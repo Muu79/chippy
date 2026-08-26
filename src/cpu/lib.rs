@@ -25,18 +25,6 @@ impl Target {
         }
     }
 
-    pub const fn is_extended(&self, display: &Display) -> bool {
-        match self {
-            SChip8Modern | SChip8Classic
-                if display.width == EXTENDED_DISPLAY_WIDTH
-                    && display.height == EXTENDED_DISPLAY_HEIGHT =>
-            {
-                true
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn default_quirks(&self) -> Quirks {
         use TargetQuirk::*;
         match self {
@@ -299,7 +287,7 @@ impl Cpu {
     }
 
     pub fn is_extended(&self) -> bool {
-        self.target.is_extended(&self.display)
+        self.display.is_extended()
     }
 
     pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
@@ -511,6 +499,30 @@ impl Cpu {
                     self.i_reg += v_x.0 as u16 + 1;
                 }
             }
+            // SCHIP Opcodes
+            ScD(n) => {
+                let n = n as usize;
+                let height = self.display.get_height();
+                let buff = self.display.get_screen_mut();
+                for curr_row in (0..height.saturating_sub(n)).rev() {
+                    buff[curr_row + n] = buff[curr_row];
+                }
+                for clear_row in 0..n {
+                    buff[clear_row] = 0;
+                }
+            }
+            ScR => self
+                .display
+                .get_screen_mut()
+                .iter_mut()
+                .for_each(|row| *row <<= 4),
+            ScL => self
+                .display
+                .get_screen_mut()
+                .iter_mut()
+                .for_each(|row| *row >>= 4),
+            LoRes => self.display.enter_lo_res(),
+            HiRes => self.display.enter_hi_res(),
             _ => unimplemented!(),
         };
         Ok(CpuCode::Ok)

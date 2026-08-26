@@ -42,7 +42,7 @@ pub struct Display {
     buffer: [u128; 64],
     pub(crate) height: usize,
     pub(crate) width: usize,
-    pub(crate) capacity: usize,
+    is_extended: bool,
 }
 
 impl Display {
@@ -52,7 +52,7 @@ impl Display {
             buffer: [0u128; 64],
             height: target.screen_height(),
             width: target.screen_width(),
-            capacity: target.screen_width() * target.screen_height(),
+            is_extended: false
         }
     }
 
@@ -62,9 +62,28 @@ impl Display {
     pub fn get_screen(&self) -> &[u128] {
         &self.buffer
     }
+    pub fn get_screen_mut(&mut self) -> &mut [u128] {&mut self.buffer}
+    
+    pub fn enter_hi_res(&mut self) {
+        self.width = 128;
+        self.height = 64;
+        self.clear();
+        self.is_extended = true;
+    }
+    
+    pub fn enter_lo_res(&mut self) {
+        self.width = 64;
+        self.height = 32;
+        self.clear();
+        self.is_extended = false;
+    }
+    
+    pub fn is_extended(&self) -> bool {
+        self.is_extended
+    }
 
     pub fn dimensions(&self) -> (usize, usize, usize) {
-        (self.width, self.height, self.capacity)
+        (self.width, self.height, self.width * self.height)
     }
     
     pub fn get_height(&self) -> usize {
