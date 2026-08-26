@@ -337,7 +337,7 @@ impl Cpu {
         use TargetQuirk::*;
         match operation {
             NoOp => (),
-            Cls => self.display.clear(),
+            ClS => self.display.clear(),
             Ret => {
                 self.pc = self.pop()?;
             }
@@ -414,8 +414,8 @@ impl Cpu {
                 } else {
                     *self.get_reg(v_y)
                 };
-                self.set_vf(source & 0x1 == 0x1);
                 *self.get_reg_mut(v_x) = source >> 1;
+                self.set_vf(source & 0x1 == 0x1);
             }
             SubN(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
@@ -429,8 +429,8 @@ impl Cpu {
                 } else {
                     *self.get_reg(v_y)
                 };
-                self.set_vf(source & 0x80 == 0x80);
                 *self.get_reg_mut(v_x) = source << 1;
+                self.set_vf(source & 0x80 == 0x80);
             }
             LdToI(nnn) => {
                 self.i_reg = nnn;
@@ -528,8 +528,14 @@ impl Cpu {
         let (x_reg, y_reg) = (VRegister(nibbles.1 as usize), VRegister(nibbles.2 as usize));
         match nibbles {
             (0, 0, 0, 0) => NoOp,
-            (0, 0, 0xE, 0) => Cls,
+            (0, 0, 0xC, _) => ScD(n),
+            (0, 0, 0xE, 0) => ClS,
             (0, 0, 0xE, 0xE) => Ret,
+            (0, 0, 0xF, 0xB) => ScR,
+            (0, 0, 0xF, 0xC) => ScL,
+            (0, 0, 0xF, 0xD) => Exit,
+            (0, 0, 0xF, 0xE) => LoRes,
+            (0, 0, 0xF, 0xF) => HiRes,
             (0x1, _, _, _) => Jp(nnn),
             (0x2, _, _, _) => Call(nnn),
             (0x3, _, _, _) => SEByte(x_reg, kk),
@@ -595,14 +601,14 @@ impl Cpu {
 struct VRegister(usize);
 enum Opcode {
     NoOp,
-    SCD(u8),
-    Cls,
+    ScD(u8),
+    ClS,
     Ret,
-    SCR,
-    SCL,
+    ScR,
+    ScL,
     Exit,
-    Low,
-    High,
+    LoRes,
+    HiRes,
     Jp(u16),
     JpReg(u16),
     Call(u16),
