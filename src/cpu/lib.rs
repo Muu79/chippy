@@ -2,6 +2,7 @@ use crate::hardware::Sprite::Zero;
 use crate::hardware::{CHAR_MAP, Display, Keyboard, Sprite};
 use log::warn;
 use rand::random;
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 const DISPLAY_WIDTH: usize = 64;
 const EXTENDED_DISPLAY_WIDTH: usize = 128;
@@ -14,7 +15,9 @@ pub enum Target {
     SChip8Modern,
     SChip8Classic,
 }
+use crate::cpu::TargetQuirk::{IncrIOnLd, ShiftUsesVx, VfExtraReset};
 use Target::*;
+
 impl Target {
     pub const fn start_address(&self) -> u16 {
         match self {
@@ -33,7 +36,87 @@ impl Target {
             _ => false,
         }
     }
+
+    pub(crate) fn default_quirks(&self) -> Quirks {
+        use TargetQuirk::*;
+        match self {
+            SChip8Modern => {
+                Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
+            }
+            SChip8Classic => {
+                Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
+            }
+            Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
+            _ => unimplemented!(),
+        }
+    }
 }
+
+#[repr(u16)]
+#[derive(Default, Clone, Copy)]
+pub enum TargetQuirk {
+    #[default]
+    ShiftUsesVx = 1 << 0,
+    IncrIOnLd = 1 << 1,
+    VfExtraReset = 1 << 2,
+    DispWait = 1 << 3,
+    JumpUsesVx = 1 << 4,
+    HasScrollOps = 1 << 5,
+    ClScrOnResChange = 1 << 6,
+}
+
+#[derive(Default)]
+pub(crate) struct Quirks {
+    quirk_map: u16,
+}
+impl From<u16> for Quirks {
+    fn from(quirk_map: u16) -> Self {
+        Self { quirk_map }
+    }
+}
+impl BitOr for Quirks {
+    type Output = Self;
+    fn bitor(self, other: Self) -> Self::Output {
+        Self {
+            quirk_map: self.quirk_map | other.quirk_map,
+        }
+    }
+}
+impl BitOr<TargetQuirk> for Quirks {
+    type Output = Self;
+    fn bitor(self, other: TargetQuirk) -> Self::Output {
+        Self {
+            quirk_map: self.quirk_map | other as u16,
+        }
+    }
+}
+impl BitOrAssign<TargetQuirk> for Quirks {
+    fn bitor_assign(&mut self, other: TargetQuirk) {
+        self.quirk_map |= other as u16;
+    }
+}
+impl BitAnd for Quirks {
+    type Output = Self;
+    fn bitand(self, other: Self) -> Self::Output {
+        Self {
+            quirk_map: self.quirk_map & other.quirk_map,
+        }
+    }
+}
+impl BitAnd<TargetQuirk> for Quirks {
+    type Output = Self;
+    fn bitand(self, other: TargetQuirk) -> Self::Output {
+        Self {
+            quirk_map: self.quirk_map & other as u16,
+        }
+    }
+}
+impl BitAndAssign<TargetQuirk> for Quirks {
+    fn bitand_assign(&mut self, other: TargetQuirk) {
+        self.quirk_map &= other as u16
+    }
+}
+
 const RAM_SIZE: usize = 4096;
 const STACK_SIZE: usize = 16;
 const REG_COUNT: usize = 16;
@@ -51,6 +134,7 @@ pub struct Cpu {
     display: Display,
     waiting_for_key: Option<VRegister>,
     target: Target,
+    target_quirks: Quirks,
 }
 
 pub enum CpuCode {
@@ -60,7 +144,7 @@ pub enum CpuCode {
 }
 impl Default for Cpu {
     fn default() -> Self {
-        Self::new(Target::Chip8)
+        Self::new(Chip8)
     }
 }
 impl Cpu {
@@ -80,7 +164,28 @@ impl Cpu {
             display: Display::new(&target),
             waiting_for_key: None,
             target,
+            target_quirks: target.default_quirks(),
         }
+    }
+
+    pub fn has_quirk(&self, quirk: TargetQuirk) -> bool {
+        self.target_quirks.quirk_map & quirk as u16 != 0
+    }
+
+    pub fn get_quirk_map(&self) -> u16 {
+        self.target_quirks.quirk_map
+    }
+
+    pub fn set_quirk_map(&mut self, quirk_map: u16) {
+        self.target_quirks.quirk_map = quirk_map
+    }
+
+    pub fn set_quirk(&mut self, quirk: TargetQuirk) {
+        self.target_quirks.quirk_map |= quirk as u16
+    }
+
+    pub fn clear_quirk(&mut self, quirk: TargetQuirk) {
+        self.target_quirks.quirk_map &= !(quirk as u16)
     }
 
     pub fn pc(&self) -> u16 {
@@ -229,6 +334,7 @@ impl Cpu {
 
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
         use Opcode::*;
+        use TargetQuirk::*;
         match operation {
             NoOp => (),
             Cls => self.display.clear(),
@@ -273,17 +379,23 @@ impl Cpu {
             Or(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) |= y;
-                self.set_vf(false);
+                if self.has_quirk(VfExtraReset) {
+                    self.set_vf(false);
+                }
             }
             And(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) &= y;
-                self.set_vf(false);
+                if self.has_quirk(VfExtraReset) {
+                    self.set_vf(false);
+                }
             }
             Xor(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) ^= y;
-                self.set_vf(false);
+                if self.has_quirk(VfExtraReset) {
+                    self.set_vf(false);
+                }
             }
             AddReg(v_x, v_y) => {
                 let sum = *self.get_reg(v_x) as u16 + *self.get_reg(v_y) as u16;
@@ -297,9 +409,13 @@ impl Cpu {
                 self.set_vf(x >= y);
             }
             ShR(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
-                *self.get_reg_mut(v_x) = y >> 1;
-                self.set_vf(y & 0x1 == 1);
+                let source = if self.has_quirk(ShiftUsesVx) {
+                    *self.get_reg(v_x)
+                } else {
+                    *self.get_reg(v_y)
+                };
+                self.set_vf(source & 0x1 == 0x1);
+                *self.get_reg_mut(v_x) = source >> 1;
             }
             SubN(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
@@ -308,14 +424,26 @@ impl Cpu {
                 self.set_vf(y >= x);
             }
             ShL(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
-                *self.get_reg_mut(v_x) = y << 1;
-                self.set_vf(y & 0x80 == 0x80);
+                let source = if self.has_quirk(ShiftUsesVx) {
+                    *self.get_reg(v_x)
+                } else {
+                    *self.get_reg(v_y)
+                };
+                self.set_vf(source & 0x80 == 0x80);
+                *self.get_reg_mut(v_x) = source << 1;
             }
             LdToI(nnn) => {
                 self.i_reg = nnn;
             }
-            JpReg(nnn) => self.pc = *self.get_reg(VRegister(0)) as u16 + nnn,
+            JpReg(nnn) => {
+                let target = if self.has_quirk(JumpUsesVx) {
+                    let v_x = VRegister((nnn >> 8) as usize);
+                    nnn.wrapping_add(*self.get_reg(v_x) as u16)
+                } else {
+                    nnn.wrapping_add(*self.get_reg(VRegister(0)) as u16)
+                };
+                self.pc = target;
+            }
             RND(v_x, kk) => {
                 *self.get_reg_mut(v_x) = random::<u8>() & kk;
             }
@@ -371,13 +499,17 @@ impl Cpu {
                 for i in 0..=v_x.0 {
                     self.ram[self.i_reg as usize + i] = *self.get_reg(VRegister(i));
                 }
-                self.i_reg += v_x.0 as u16 + 1;
+                if self.has_quirk(IncrIOnLd) {
+                    self.i_reg += v_x.0 as u16 + 1;
+                }
             }
             LdIToVx(v_x) => {
                 for i in 0..=v_x.0 {
                     *self.get_reg_mut(VRegister(i)) = self.ram[self.i_reg as usize + i];
                 }
-                self.i_reg += v_x.0 as u16 + 1;
+                if self.has_quirk(IncrIOnLd) {
+                    self.i_reg += v_x.0 as u16 + 1;
+                }
             }
             _ => unimplemented!(),
         };
