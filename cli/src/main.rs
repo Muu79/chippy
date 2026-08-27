@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let frame_start = Instant::now();
         run_cpu_cycles(&mut cpu, &mut frontend)?;
-        frontend.update_keys(frontend.poll_events(), cpu.get_mut_keys())?;
+        frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
         cpu.tick_timers();
         frontend.draw_screen(&mut terminal, &cpu)?;
         let elapsed = frame_start.elapsed();
@@ -101,7 +101,7 @@ fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend) -> Result<(), &'static
     for _ in 0..CYCLES_PER_FRAME {
         match cpu.tick_cpu()? {
             CpuCode::StartWaitForKey => {
-                frontend.update_keys(frontend.poll_events(), cpu.get_mut_keys())?;
+                frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
                 frontend.keys.reset_input_key();
                 break;
             }
