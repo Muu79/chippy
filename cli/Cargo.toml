@@ -1,0 +1,14 @@
+[package]
+name = "chippy_cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "chippy"
+path = "src/bin/main.rs"
+
+[dependencies]
+chippy_core = { path = "../core" }
+crossterm = { version = "0.29.0", features = ["default", "event-stream"] }
+ratatui = { version = "0.30.2", features = ["crossterm_0_29"]}
+log = "0.4.33"
