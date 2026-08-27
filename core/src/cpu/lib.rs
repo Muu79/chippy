@@ -348,7 +348,7 @@ impl Cpu {
                 *self.get_reg_mut(v_x) = kk;
             }
             AddByte(v_x, kk) => {
-                *self.get_reg_mut(v_x) += kk;
+                *self.get_reg_mut(v_x) = self.get_reg(v_x).wrapping_add(kk);
             }
             LdReg(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
@@ -376,14 +376,15 @@ impl Cpu {
                 }
             }
             AddReg(v_x, v_y) => {
-                let sum = *self.get_reg(v_x) as u16 + *self.get_reg(v_y) as u16;
-                *self.get_reg_mut(v_x) = sum as u8;
-                self.set_vf(sum > 0xff);
+                let x = *self.get_reg(v_x);
+                let y = *self.get_reg(v_y);
+                *self.get_reg_mut(v_x) = x.wrapping_add(y);
+                self.set_vf((x as u16 + y as u16) > 0xff);
             }
             Sub(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
                 let y = *self.get_reg(v_y);
-                *self.get_reg_mut(v_x) = x - y;
+                *self.get_reg_mut(v_x) = x.wrapping_sub(y);
                 self.set_vf(x >= y);
             }
             ShR(v_x, v_y) => {
@@ -398,7 +399,7 @@ impl Cpu {
             SubN(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
                 let y = *self.get_reg(v_y);
-                *self.get_reg_mut(v_x) = y - x;
+                *self.get_reg_mut(v_x) = y.wrapping_sub(x);
                 self.set_vf(y >= x);
             }
             ShL(v_x, v_y) => {
@@ -464,7 +465,7 @@ impl Cpu {
             }
             LdVxToDT(v_x) => self.debug_time = *self.get_reg(v_x),
             LdVxToST(v_x) => self.sound_timer = *self.get_reg(v_x),
-            AddToI(v_x) => self.i_reg += *self.get_reg(v_x) as u16,
+            AddToI(v_x) => self.i_reg = self.i_reg.wrapping_add(*self.get_reg(v_x) as u16), // IIRC wrapping add on I is not possible
             LdSpr(v_x) => self.i_reg = Sprite::from_hex(*self.get_reg(v_x))? as u16,
             LdDeci(v_x) => {
                 let val = *self.get_reg(v_x) as u16;
