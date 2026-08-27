@@ -49,7 +49,7 @@ pub enum TargetQuirk {
 
 #[derive(Default)]
 pub(crate) struct Quirks {
-    quirk_map: u16,
+    pub(crate) quirk_map: u16,
 }
 
 pub(super) const RAM_SIZE: usize = 4096;

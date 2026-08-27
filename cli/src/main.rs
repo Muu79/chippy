@@ -7,18 +7,18 @@ use chippy_core::cpu::{Cpu, CpuCode, Target};
 use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use crossterm::execute;
+use crossterm::{execute, SynchronizedUpdate};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     supports_keyboard_enhancement,
 };
 use frontend::Frontend;
-use log::warn;
+use log::{error, warn};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::env;
 use std::error::Error;
-use std::io::{Stdout, stdout};
+use std::io::{Stdout, stdout, stderr};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -57,12 +57,28 @@ impl Drop for TerminalGuard {
     }
 }
 
+fn install_panic_hook() {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // restore terminal FIRST, so the panic message that follows
+        // actually lands on the user's visible screen, not the alternate buffer
+        let _ = disable_raw_mode();
+        let _ = execute!(stdout(), LeaveAlternateScreen);
+        // no need to conditionally pop keyboard enhancement flags here with
+        // perfect accuracy, best-effort is fine mid-panic
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+
+        original_hook(panic_info); // now print the actual panic message/backtrace
+    }));
+}
+
 const CPU_HZ: u16 = 700;
 const DISPLAY_HZ: u16 = 60;
 const CYCLES_PER_FRAME: u16 = CPU_HZ / DISPLAY_HZ;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000) / DISPLAY_HZ as u64);
 
 fn main() -> Result<(), Box<dyn Error>> {
+    install_panic_hook();
     let (_guard, mut terminal) = TerminalGuard::new()?;
     let rom_path = env::args().nth(1).ok_or("No ROM file specified")?;
     let target = {
