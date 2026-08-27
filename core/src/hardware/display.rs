@@ -1,4 +1,5 @@
 use crate::cpu::Target;
+use std::fmt::Write;
 use std::iter::repeat_n;
 
 impl Target {
@@ -95,24 +96,7 @@ impl Display {
     pub fn get_width(&self) -> usize {
         self.width
     }
-    pub fn to_string(&self) -> String {
-        let mut output = String::new();
-        output.push('\u{250C}');
-        output.extend(repeat_n('\u{2500}', 64));
-        output.push('\u{2510}');
-        output.push('\n');
-        for row in 0..self.height {
-            output.push('\u{2502}');
-            let line = self.buffer[row];
-            output.extend((0..64).map(|offset| if (1 << offset) & line != 0 { '*' } else { ' ' }));
-            output.push('\u{2502}');
-            output.push('\n');
-        }
-        output.push('\u{2514}');
-        output.extend(repeat_n('\u{2500}', 64));
-        output.push('\u{2518}');
-        output
-    }
+    
     pub fn draw_byte(&mut self, row: usize, col: usize, byte: u8) -> Result<bool, &'static str> {
         let row = row % self.height;
         let col = (col % self.width) as u64;
@@ -145,6 +129,33 @@ impl Display {
             }
         }
         Ok(vf)
+    }
+}
+
+impl std::fmt::Display for Display {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('\u{250C}')?;
+        f.write_str(&repeat_n('\u{2500}', 64).collect::<String>())?;
+        f.write_char('\u{2510}')?;
+        f.write_char('\n')?;
+        for row in 0..self.height {
+            f.write_char('\u{2502}')?;
+            let line = self.buffer[row];
+            f.write_str(&(0..self.width).fold(String::new(), |mut acc, offset| {
+                if (1 << offset) & line != 0 {
+                    acc.push('*')
+                } else {
+                    acc.push(' ')
+                };
+                acc
+            }))?;
+            f.write_char('\u{2502}')?;
+            f.write_char('\n')?;
+        }
+        f.write_char('\u{2514}')?;
+        f.write_str(&repeat_n('\u{2500}', 64).collect::<String>())?;
+        f.write_char('\u{2518}')?;
+        Ok(())
     }
 }
 

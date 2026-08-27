@@ -13,13 +13,12 @@ use crossterm::terminal::{
     supports_keyboard_enhancement,
 };
 use frontend::Frontend;
-use log::{error, warn};
+use log::warn;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::env;
 use std::error::Error;
-use std::io::{Stdout, Write, stdout};
-use std::path::Path;
+use std::io::{Stdout, stdout};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -83,12 +82,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut cpu = Cpu::new(target);
     let mut frontend = Frontend::new();
     cpu.load_rom(&rom)?;
-    'main: loop {
+    loop {
         let frame_start = Instant::now();
         run_cpu_cycles(&mut cpu, &mut frontend)?;
         frontend.update_keys(frontend.poll_events(), cpu.get_mut_keys())?;
         cpu.tick_timers();
-        frontend.draw_screen(&mut terminal, &mut cpu)?;
+        frontend.draw_screen(&mut terminal, &cpu)?;
         let elapsed = frame_start.elapsed();
         if elapsed < FRAME_TIME {
             sleep(FRAME_TIME - elapsed);
@@ -96,7 +95,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             warn!("Frame took too long: {}ms", elapsed.as_millis());
         }
     }
-    Ok(())
 }
 
 fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend) -> Result<(), &'static str> {

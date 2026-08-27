@@ -1,13 +1,8 @@
-use crate::hardware::Sprite::Zero;
 use crate::hardware::{CHAR_MAP, Display, Keyboard, Sprite};
 use log::warn;
 use rand::random;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
-const DISPLAY_WIDTH: usize = 64;
-const EXTENDED_DISPLAY_WIDTH: usize = 128;
-const DISPLAY_HEIGHT: usize = 32;
-const EXTENDED_DISPLAY_HEIGHT: usize = 64;
 /// Target for CPU to emulate
 #[derive(PartialEq, Copy, Clone)]
 pub enum Target {
@@ -15,7 +10,6 @@ pub enum Target {
     SChip8Modern,
     SChip8Classic,
 }
-use crate::cpu::TargetQuirk::{IncrIOnLd, ShiftUsesVx, VfExtraReset};
 use Target::*;
 
 impl Target {
@@ -35,7 +29,6 @@ impl Target {
                 Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
             }
             Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
-            _ => unimplemented!(),
         }
     }
 }
@@ -110,19 +103,19 @@ const STACK_SIZE: usize = 16;
 const REG_COUNT: usize = 16;
 
 pub struct Cpu {
-    ram: [u8; RAM_SIZE],
-    v_reg: [u8; REG_COUNT],
-    i_reg: u16,
-    stack: Vec<u16>,
-    stack_ptr: u16,
-    pc: u16,
-    sound_timer: u8,
-    debug_time: u8,
-    keys: Keyboard,
-    display: Display,
-    waiting_for_key: Option<VRegister>,
-    target: Target,
-    target_quirks: Quirks,
+    pub(crate) ram: [u8; RAM_SIZE],
+    pub(crate) v_reg: [u8; REG_COUNT],
+    pub(crate) i_reg: u16,
+    pub(crate) stack: Vec<u16>,
+    pub(crate) stack_ptr: u16,
+    pub(crate) pc: u16,
+    pub(crate) sound_timer: u8,
+    pub(crate) debug_time: u8,
+    pub(crate) keys: Keyboard,
+    pub(crate) display: Display,
+    pub(crate) waiting_for_key: Option<VRegister>,
+    pub(crate) target: Target,
+    pub(crate) target_quirks: Quirks,
 }
 
 pub enum CpuCode {
@@ -199,7 +192,7 @@ impl Cpu {
     }
 
     pub fn get_target(&self) -> Target {
-        self.target.clone()
+        self.target
     }
 
     pub fn get_display(&self) -> &Display {
@@ -213,7 +206,8 @@ impl Cpu {
         if rom.len() + 0x200 > RAM_SIZE {
             return Err("ROM too large");
         }
-        Ok(self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom))
+        self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
+        Ok(())
     }
 
     fn push(&mut self, val: u16) {
@@ -302,11 +296,7 @@ impl Cpu {
         }
         let opcode = self.fetch()?;
         let operation = self.decode(opcode);
-        Ok(self.execute(operation)?)
-    }
-
-    pub fn to_string(&self) -> String {
-        self.display.to_string()
+        self.execute(operation)
     }
     fn get_reg(&self, reg: VRegister) -> &u8 {
         &self.v_reg[reg.0]
@@ -432,7 +422,7 @@ impl Cpu {
                 };
                 self.pc = target;
             }
-            RND(v_x, kk) => {
+            Rand(v_x, kk) => {
                 *self.get_reg_mut(v_x) = random::<u8>() & kk;
             }
             Drw(v_x, v_y, n) => {
@@ -507,9 +497,7 @@ impl Cpu {
                 for curr_row in (0..height.saturating_sub(n)).rev() {
                     buff[curr_row + n] = buff[curr_row];
                 }
-                for clear_row in 0..n {
-                    buff[clear_row] = 0;
-                }
+                buff.iter_mut().take(n).for_each(|row| *row = 0);
             }
             ScR => self
                 .display
@@ -567,7 +555,7 @@ impl Cpu {
             (0x9, _, _, 0) => SNEReg(x_reg, y_reg),
             (0xA, _, _, _) => LdToI(nnn),
             (0xB, _, _, _) => JpReg(nnn),
-            (0xC, _, _, _) => RND(x_reg, kk),
+            (0xC, _, _, _) => Rand(x_reg, kk),
             (0xD, _, _, _) => Drw(x_reg, y_reg, n),
             (0xE, _, 0x9, 0xE) => SkP(x_reg),
             (0xE, _, 0xA, 0x1) => SkNP(x_reg),
@@ -586,7 +574,8 @@ impl Cpu {
 
     pub fn write_hex(&mut self, line: usize, hex: u32) -> Result<(), &'static str> {
         for (i, sprite) in parse_hex(hex).iter().enumerate() {
-            self.display.draw_sprite(line * 5, i * 8, sprite, &self.ram);
+            self.display
+                .draw_sprite(line * 5, i * 8, sprite, &self.ram)?;
         }
         Ok(())
     }
@@ -597,11 +586,11 @@ impl Cpu {
         y: usize,
         sprite: &Sprite,
     ) -> Result<bool, &'static str> {
-        Ok(self.display.draw_sprite(x, y, sprite, &self.ram)?)
+        self.display.draw_sprite(x, y, sprite, &self.ram)
     }
 
     pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> Result<bool, &'static str> {
-        Ok(self.display.draw_byte(x, y, byte)?)
+        self.display.draw_byte(x, y, byte)
     }
 
     pub fn set_keyboard(&mut self, keys: Keyboard) {
@@ -610,7 +599,7 @@ impl Cpu {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-struct VRegister(usize);
+pub(crate) struct VRegister(usize);
 enum Opcode {
     NoOp,
     ScD(u8),
@@ -649,7 +638,7 @@ enum Opcode {
     ShR(VRegister, VRegister),
     SubN(VRegister, VRegister),
     ShL(VRegister, VRegister),
-    RND(VRegister, u8),
+    Rand(VRegister, u8),
     Drw(VRegister, VRegister, u8),
     SkP(VRegister),
     SkNP(VRegister),
@@ -666,8 +655,8 @@ const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {
 
 pub fn parse_hex(hex: u32) -> [Sprite; 8] {
     let mut ans = [Sprite::default(); 8];
-    for i in 0..8 {
-        ans[i] = Sprite::from_hex(((hex >> ((7 - i) * 4)) & 0xF) as u8).unwrap_or_default();
+    for (i, sprite) in ans.iter_mut().enumerate() {
+        *sprite = Sprite::from_hex(((hex >> ((7 - i) * 4)) & 0xF) as u8).unwrap_or_default();
     }
     ans
 }

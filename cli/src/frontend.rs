@@ -1,7 +1,6 @@
-use chippy_core::cpu::Target;
 use chippy_core::hardware::Keyboard;
 use crossterm::event;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::Event;
 use std::time::Duration;
 
 /// Represents the frontend component of the system, which handles display and keyboard state.
@@ -19,7 +18,7 @@ use std::time::Duration;
 /// # Visibility
 ///
 /// Both fields are restricted to the crate scope using `pub(crate)`, making them
-/// inaccessible outside of the crate while still being usable internally.
+/// inaccessible outside the crate, while still being usable internally.
 pub struct Frontend {
     pub(crate) keys: Keyboard,
     pub(crate) debug_mode: bool,

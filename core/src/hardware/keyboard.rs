@@ -1,7 +1,7 @@
 use std::fmt::Formatter;
 use std::ops::{BitOrAssign, BitXorAssign};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Keyboard {
     map: u16,
     pub input_key: Option<u8>,
@@ -27,20 +27,23 @@ impl Keyboard {
         if self.input_key.is_none() {
             self.input_key = Some(key);
         }
-        Ok(self.map |= 1 << key)
+        self.map |= 1 << key;
+        Ok(())
     }
 
     pub fn release(&mut self, key: u8) -> Result<(), &'static str> {
         if key > 15 {
             return Err(INVALID_KEY_ERROR);
         }
-        Ok(self.map &= !(1 << key))
+        self.map &= !(1 << key);
+        Ok(())
     }
 
     pub fn is_pressed(&self, key: u8) -> Result<bool, &'static str> {
         if key > 15 {
             return Err(INVALID_KEY_ERROR);
         }
+        ;
         Ok((self.map & (1 << key)) != 0)
     }
 

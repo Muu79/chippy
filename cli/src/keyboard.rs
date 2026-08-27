@@ -1,12 +1,7 @@
 use crate::frontend::Frontend;
 use chippy_core::hardware::Keyboard;
 use chippy_core::parse_hex;
-use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
-use log::{error, info};
-use std::ops::Shl;
-
-pub fn poll_keys(new_state: &Keyboard, curr_state: &mut Keyboard) {}
 
 impl Frontend {
     pub fn update_keys(
@@ -26,13 +21,12 @@ impl Frontend {
             use KeyCode::*;
             match key_event.kind {
                 Press if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                    info!("Control modifier pressed");
-                    match key_event.code {
-                        Char(ch) => match ch {
+                    if let Char(ch) = key_event.code {
+                        match ch {
                             'q' | 'c' | 'Q' | 'C' => return Err("Quitting"),
+                            'i' | 'I' => {},
                             _ => (),
-                        },
-                        _ => (),
+                        }
                     }
                 }
                 Press => match key_event.code {
@@ -53,7 +47,7 @@ impl Frontend {
                 _ => {}
             }
         }
-        *cpu_keyboard = self.keys.clone();
+        *cpu_keyboard = self.keys;
         Ok(())
     }
 }

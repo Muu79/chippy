@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{BufRead, Cursor, Read, Write};
 
+#[allow(dead_code)]
 struct Assembler<R: Read + BufRead, W: Write> {
     input: Cursor<R>,
     output: W,
@@ -18,7 +19,7 @@ impl<R: Read + BufRead, W: Write> Assembler<R, W> {
     }
 
     pub fn read_line(&mut self) -> Result<(), Box<dyn Error>> {
-        let line = self.input.get_mut().read_line(&mut String::new())?;
+        let _line = self.input.get_mut().read_line(&mut String::new())?;
         Ok(())
     }
 

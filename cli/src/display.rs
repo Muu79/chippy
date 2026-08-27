@@ -1,19 +1,18 @@
 use crate::Term;
 use crate::frontend::Frontend;
 use chippy_core::cpu::Cpu;
-use ratatui::layout::Constraint::{Fill, Length, Min, Percentage, Ratio};
+use ratatui::layout::Constraint::{Fill, Length, Min};
 use ratatui::layout::Direction::Horizontal;
-use ratatui::layout::{Flex, Offset};
 use ratatui::prelude::Constraint::Max;
 use ratatui::prelude::Direction::Vertical;
-use ratatui::widgets::{BorderType, List, ListItem, Padding, Paragraph, Row, Scrollbar, Table};
+use ratatui::widgets::{BorderType, List, ListItem, Padding, Paragraph};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders},
 };
 use std::rc::Rc;
-
-fn is_pixel_on(line: u128, row: usize, col: usize) -> bool {
+#[allow(unused)]
+fn is_pixel_on(line: u128, _row: usize, col: usize) -> bool {
     line & (1 << col) != 0
 }
 fn half_block_char(top: bool, bottom: bool) -> char {
