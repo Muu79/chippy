@@ -20,7 +20,7 @@ impl Frontend {
     }
 
     fn render_registers(frame: &mut Frame, area: Rect, cpu: &Cpu) {
-        let v = cpu.v_regs();
+        let v = cpu.get_v_regs();
         let mut buff = Text::default();
         for (i, &val) in v.iter().enumerate() {
             let (idx, val) = (format!("{:01X}", i).fg(Color::Yellow), format!("{:#04X}", val).fg(Color::Cyan).bg(Color::White));
@@ -42,13 +42,13 @@ impl Frontend {
 
     fn render_special_reg_and_stack(frame: &mut Frame, area: Rect, cpu: &Cpu) {
         let mut lines = vec![
-            format!("PC: {:#06X}", cpu.pc()),
-            format!("I:  {:#06X}", cpu.i_reg()),
-            format!("DT: {:>#03X} ({}s)", cpu.delay_timer(), cpu.delay_timer() / 60),
+            format!("PC: {:#06X}", cpu.get_pc()),
+            format!("I:  {:#06X}", cpu.get_i_reg()),
+            format!("DT: {:>#03X} ({}s)", cpu.get_delay_timer(), cpu.get_delay_timer() / 60),
             format!(
                 "ST: {:>#03X} ({}s){}",
-                cpu.sound_timer(),
-                cpu.sound_timer() / 60,
+                cpu.get_sound_timer(),
+                cpu.get_sound_timer() / 60,
                 if cpu.is_making_sound() {
                     " \u{1F50A}"
                 } else {
@@ -57,7 +57,7 @@ impl Frontend {
             ),
             "-- stack --".to_string(),
         ];
-        for (i, &addr) in cpu.stack().iter().enumerate().rev() {
+        for (i, &addr) in cpu.get_stack().iter().enumerate().rev() {
             lines.push(format!("[{i}] {:#06X}", addr));
         }
 
