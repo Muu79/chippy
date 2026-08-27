@@ -1,8 +1,8 @@
+use chippy_core::cpu::Target;
 use chippy_core::hardware::Keyboard;
 use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use std::time::Duration;
-use chippy_core::cpu::Target;
 
 /// Represents the frontend component of the system, which handles display and keyboard state.
 ///
@@ -35,12 +35,12 @@ impl Frontend {
     }
 
     /// Poll all events triggered since this function's last execution
-    pub fn poll_events(&self) -> Vec<Event>{
+    pub fn poll_events(&self) -> Vec<Event> {
         let mut events = vec![];
         while event::poll(Duration::ZERO).unwrap() {
             let event = event::read().unwrap();
             events.push(event);
-        };
+        }
         events
     }
 }

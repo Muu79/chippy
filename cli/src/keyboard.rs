@@ -35,18 +35,16 @@ impl Frontend {
                         _ => (),
                     }
                 }
-                Press => {
-                    match key_event.code {
-                        F(1) => self.debug_mode ^= true,
-                        Char(_) => {
-                            if let Some(key_idx) = key_idx {
-                                self.keys.press(key_idx as u8)?;
-                                continue;
-                            }
+                Press => match key_event.code {
+                    F(1) => self.debug_mode ^= true,
+                    Char(_) => {
+                        if let Some(key_idx) = key_idx {
+                            self.keys.press(key_idx as u8)?;
+                            continue;
                         }
-                        _ => (),
                     }
-                }
+                    _ => (),
+                },
                 Release => {
                     if let Some(key_idx) = key_idx {
                         self.keys.release(key_idx as u8)?

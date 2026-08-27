@@ -50,20 +50,17 @@ impl Frontend {
                 let mut screen_area = horizontal[0];
                 screen_area.height = vertical[0].height;
                 let (reg, timer, stack) = if cpu.is_extended() {
-                    let right_panel =
-                        Layout::vertical([Min(17), Max(4), Fill(1)]).spacing(1).split(horizontal[1]);
+                    let right_panel = Layout::vertical([Min(17), Max(4), Fill(1)])
+                        .spacing(1)
+                        .split(horizontal[1]);
                     (right_panel[0], right_panel[1], right_panel[2])
                 } else {
-                    let bot_hor = Layout::horizontal([Fill(1), Fill(1)]).spacing(1).split(vertical[1]);
+                    let bot_hor = Layout::horizontal([Fill(1), Fill(1)])
+                        .spacing(1)
+                        .split(vertical[1]);
                     (horizontal[1], bot_hor[0], bot_hor[1])
                 };
-                [
-                    screen_area,
-                    reg,
-                    timer,
-                    stack,
-                ]
-                .into()
+                [screen_area, reg, timer, stack].into()
             };
             frame.render_widget(block, area);
             self.render_chip_screen(frame, cpu, areas[0]).err();
@@ -148,10 +145,7 @@ impl Frontend {
         }
 
         let items: Vec<ListItem> = lines.into_iter().map(ListItem::new).collect();
-        let list = List::new(items).block(
-            Block::default()
-                .title("PC / I / Stack"),
-        );
+        let list = List::new(items).block(Block::default().title("PC / I / Stack"));
         frame.render_widget(list, area);
     }
 

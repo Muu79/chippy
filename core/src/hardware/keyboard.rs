@@ -47,11 +47,10 @@ impl Keyboard {
     pub fn as_input_key(&self) -> Option<u8> {
         self.input_key
     }
-    
+
     pub fn reset_input_key(&mut self) {
         self.input_key = None;
     }
-    
 }
 
 impl std::fmt::Display for Keyboard {

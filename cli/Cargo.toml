@@ -5,7 +5,7 @@ edition = "2024"
 
 [[bin]]
 name = "chippy"
-path = "src/bin/main.rs"
+path = "src/main.rs"
 
 [dependencies]
 chippy_core = { path = "../core" }

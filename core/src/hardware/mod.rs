@@ -1,6 +1,5 @@
-mod keyboard;
 pub mod display;
+mod keyboard;
 
-pub use keyboard::*;
 pub use display::*;
-
+pub use keyboard::*;
