@@ -197,7 +197,7 @@ impl Cpu {
             return Ok(CpuCode::Skipped);
         }
         let opcode = self.fetch()?;
-        let operation = self.decode(opcode);
+        let operation = decode_opcode(opcode);
         self.execute(operation)
     }
     fn get_reg(&self, reg: VRegister) -> &u8 {
@@ -422,58 +422,6 @@ impl Cpu {
     fn set_vf(&mut self, pred: bool) {
         self.v_reg[0xF] = if pred { 1 } else { 0 };
     }
-    fn decode(&self, opcode: u16) -> Opcode {
-        use Opcode::*;
-        let nibbles = nibble_op_code(opcode);
-        let n = nibbles.3;
-        let kk = opcode as u8;
-        let nnn = opcode & 0xfff;
-        let (x_reg, y_reg) = (VRegister(nibbles.1 as usize), VRegister(nibbles.2 as usize));
-        match nibbles {
-            (0, 0, 0, 0) => NoOp,
-            (0, 0, 0xC, _) => ScD(n),
-            (0, 0, 0xE, 0) => ClS,
-            (0, 0, 0xE, 0xE) => Ret,
-            (0, 0, 0xF, 0xB) => ScR,
-            (0, 0, 0xF, 0xC) => ScL,
-            (0, 0, 0xF, 0xD) => Exit,
-            (0, 0, 0xF, 0xE) => LoRes,
-            (0, 0, 0xF, 0xF) => HiRes,
-            (0x1, _, _, _) => Jp(nnn),
-            (0x2, _, _, _) => Call(nnn),
-            (0x3, _, _, _) => SEByte(x_reg, kk),
-            (0x4, _, _, _) => SNEByte(x_reg, kk),
-            (0x5, _, _, _) => SEReg(x_reg, y_reg),
-            (0x6, _, _, _) => LdByte(x_reg, kk),
-            (0x7, _, _, _) => AddByte(x_reg, kk),
-            (0x8, _, _, 0x0) => LdReg(x_reg, y_reg),
-            (0x8, _, _, 0x1) => Or(x_reg, y_reg),
-            (0x8, _, _, 0x2) => And(x_reg, y_reg),
-            (0x8, _, _, 0x3) => Xor(x_reg, y_reg),
-            (0x8, _, _, 0x4) => AddReg(x_reg, y_reg),
-            (0x8, _, _, 0x5) => Sub(x_reg, y_reg),
-            (0x8, _, _, 0x6) => ShR(x_reg, y_reg),
-            (0x8, _, _, 0x7) => SubN(x_reg, y_reg),
-            (0x8, _, _, 0xE) => ShL(x_reg, y_reg),
-            (0x9, _, _, 0) => SNEReg(x_reg, y_reg),
-            (0xA, _, _, _) => LdToI(nnn),
-            (0xB, _, _, _) => JpReg(nnn),
-            (0xC, _, _, _) => Rand(x_reg, kk),
-            (0xD, _, _, _) => Drw(x_reg, y_reg, n),
-            (0xE, _, 0x9, 0xE) => SkP(x_reg),
-            (0xE, _, 0xA, 0x1) => SkNP(x_reg),
-            (0xF, _, 0x0, 0x7) => LdDTToVx(x_reg),
-            (0xF, _, 0x0, 0xA) => LDkey(x_reg),
-            (0xF, _, 0x1, 0x5) => LdVxToDT(x_reg),
-            (0xF, _, 0x1, 0x8) => LdVxToST(x_reg),
-            (0xF, _, 0x1, 0xE) => AddToI(x_reg),
-            (0xF, _, 0x2, 0x9) => LdSpr(x_reg),
-            (0xF, _, 0x3, 0x3) => LdDeci(x_reg),
-            (0xF, _, 0x5, 0x5) => LdVxToI(x_reg),
-            (0xF, _, 0x6, 0x5) => LdIToVx(x_reg),
-            (_, _, _, _) => NoOp,
-        }
-    }
 
     pub fn write_hex(&mut self, line: usize, hex: u32) -> Result<(), &'static str> {
         for (i, sprite) in parse_hex(hex).iter().enumerate() {
@@ -495,61 +443,6 @@ impl Cpu {
     pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> Result<bool, &'static str> {
         self.display.draw_byte(x, y, byte)
     }
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub(crate) struct VRegister(usize);
-enum Opcode {
-    NoOp,
-    ScD(u8),
-    ClS,
-    Ret,
-    ScR,
-    ScL,
-    Exit,
-    LoRes,
-    HiRes,
-    Jp(u16),
-    JpReg(u16),
-    Call(u16),
-    SEByte(VRegister, u8),
-    SEReg(VRegister, VRegister),
-    SNEByte(VRegister, u8),
-    SNEReg(VRegister, VRegister),
-    LdByte(VRegister, u8),
-    LdReg(VRegister, VRegister),
-    LdToI(u16),
-    LDkey(VRegister),
-    LdSpr(VRegister),
-    LdDeci(VRegister),
-    LdVxToI(VRegister),
-    LdIToVx(VRegister),
-    LdVxToDT(VRegister),
-    LdDTToVx(VRegister),
-    LdVxToST(VRegister),
-    AddByte(VRegister, u8),
-    AddReg(VRegister, VRegister),
-    AddToI(VRegister),
-    Or(VRegister, VRegister),
-    And(VRegister, VRegister),
-    Xor(VRegister, VRegister),
-    Sub(VRegister, VRegister),
-    ShR(VRegister, VRegister),
-    SubN(VRegister, VRegister),
-    ShL(VRegister, VRegister),
-    Rand(VRegister, u8),
-    Drw(VRegister, VRegister, u8),
-    SkP(VRegister),
-    SkNP(VRegister),
-}
-
-const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {
-    (
-        ((opcode & 0xf000) >> 12) as u8,
-        ((opcode & 0x0f00) >> 8) as u8,
-        ((opcode & 0x00f0) >> 4) as u8,
-        (opcode & 0x000f) as u8,
-    )
 }
 
 pub fn parse_hex(hex: u32) -> [Sprite; 8] {
