@@ -11,6 +11,7 @@ pub enum Target {
     SChip8Classic,
 }
 use Target::*;
+use crate::cpu::encode_decode::{decode_opcode, Opcode, VRegister};
 
 impl Target {
     pub const fn start_address(&self) -> u16 {
@@ -19,7 +20,7 @@ impl Target {
         }
     }
 
-    pub(crate) fn default_quirks(&self) -> Quirks {
+    pub(super) fn default_quirks(&self) -> Quirks {
         use TargetQuirk::*;
         match self {
             SChip8Modern => {
@@ -98,24 +99,24 @@ impl BitAndAssign<TargetQuirk> for Quirks {
     }
 }
 
-const RAM_SIZE: usize = 4096;
-const STACK_SIZE: usize = 16;
-const REG_COUNT: usize = 16;
+pub(super) const RAM_SIZE: usize = 4096;
+pub(super) const STACK_SIZE: usize = 16;
+pub(super) const REG_COUNT: usize = 16;
 
 pub struct Cpu {
-    pub(crate) ram: [u8; RAM_SIZE],
-    pub(crate) v_reg: [u8; REG_COUNT],
-    pub(crate) i_reg: u16,
-    pub(crate) stack: Vec<u16>,
-    pub(crate) stack_ptr: u16,
-    pub(crate) pc: u16,
-    pub(crate) sound_timer: u8,
-    pub(crate) debug_time: u8,
-    pub(crate) keys: Keyboard,
-    pub(crate) display: Display,
-    pub(crate) waiting_for_key: Option<VRegister>,
-    pub(crate) target: Target,
-    pub(crate) target_quirks: Quirks,
+    pub(super) ram: [u8; RAM_SIZE],
+    pub(super) v_reg: [u8; REG_COUNT],
+    pub(super) i_reg: u16,
+    pub(super) stack: Vec<u16>,
+    pub(super) stack_ptr: u16,
+    pub(super) pc: u16,
+    pub(super) sound_timer: u8,
+    pub(super) delay_timer: u8,
+    pub(super) keys: Keyboard,
+    pub(super) display: Display,
+    pub(super) waiting_for_key: Option<VRegister>,
+    pub(super) target: Target,
+    pub(super) target_quirks: Quirks,
 }
 
 pub enum CpuCode {
@@ -140,7 +141,7 @@ impl Cpu {
             stack_ptr: 0,
             pc: target.start_address(),
             sound_timer: 0,
-            debug_time: 0,
+            delay_timer: 0,
             keys: Keyboard::new(),
             display: Display::new(&target),
             waiting_for_key: None,
@@ -149,82 +150,13 @@ impl Cpu {
         }
     }
 
-    pub fn has_quirk(&self, quirk: TargetQuirk) -> bool {
-        self.target_quirks.quirk_map & quirk as u16 != 0
-    }
 
-    pub fn get_quirk_map(&self) -> u16 {
-        self.target_quirks.quirk_map
-    }
-
-    pub fn set_quirk_map(&mut self, quirk_map: u16) {
-        self.target_quirks.quirk_map = quirk_map
-    }
-
-    pub fn set_quirk(&mut self, quirk: TargetQuirk) {
-        self.target_quirks.quirk_map |= quirk as u16
-    }
-
-    pub fn clear_quirk(&mut self, quirk: TargetQuirk) {
-        self.target_quirks.quirk_map &= !(quirk as u16)
-    }
-
-    pub fn pc(&self) -> u16 {
-        self.pc
-    }
-    pub fn i_reg(&self) -> u16 {
-        self.i_reg
-    }
-    pub fn v_regs(&self) -> &[u8; REG_COUNT] {
-        &self.v_reg
-    }
-    pub fn stack(&self) -> &[u16] {
-        &self.stack[..self.stack_ptr as usize]
-    }
-    pub fn delay_timer(&self) -> u8 {
-        self.debug_time
-    }
-    pub fn sound_timer(&self) -> u8 {
-        self.sound_timer
-    }
-    pub fn target(&self) -> Target {
-        self.target
-    }
-
-    pub fn get_target(&self) -> Target {
-        self.target
-    }
-
-    pub fn get_display(&self) -> &Display {
-        &self.display
-    }
-
-    pub fn get_mut_keys(&mut self) -> &mut Keyboard {
-        &mut self.keys
-    }
     pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
         if rom.len() + 0x200 > RAM_SIZE {
             return Err("ROM too large");
         }
         self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
         Ok(())
-    }
-
-    fn push(&mut self, val: u16) {
-        if self.stack_ptr == self.stack.len() as u16 {
-            warn!("Stack overflowed\nIncreasing stack size (this shouldn't happen)");
-            self.stack.push(0);
-        }
-        self.stack[self.stack_ptr as usize] = val;
-        self.stack_ptr += 1;
-    }
-
-    fn pop(&mut self) -> Result<u16, &'static str> {
-        if self.stack_ptr == 0 {
-            return Err("Attempted to pop from empty stack");
-        }
-        self.stack_ptr -= 1;
-        Ok(self.stack[self.stack_ptr as usize])
     }
 
     pub fn reset(&mut self) {
@@ -234,7 +166,7 @@ impl Cpu {
         self.stack_ptr = 0;
         self.pc = self.target.start_address();
         self.sound_timer = 0;
-        self.debug_time = 0;
+        self.delay_timer = 0;
         self.keys.reset();
         self.display.clear();
     }
@@ -256,6 +188,23 @@ impl Cpu {
         std::mem::swap(self, other);
     }
 
+    fn push(&mut self, val: u16) {
+        if self.stack_ptr == self.stack.len() as u16 {
+            warn!("Stack overflowed\nIncreasing stack size (this shouldn't happen)");
+            self.stack.push(0);
+        }
+        self.stack[self.stack_ptr as usize] = val;
+        self.stack_ptr += 1;
+    }
+
+    fn pop(&mut self) -> Result<u16, &'static str> {
+        if self.stack_ptr == 0 {
+            return Err("Attempted to pop from empty stack");
+        }
+        self.stack_ptr -= 1;
+        Ok(self.stack[self.stack_ptr as usize])
+    }
+
     fn fetch(&mut self) -> Result<u16, &'static str> {
         let addr = self.pc;
         let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
@@ -264,8 +213,8 @@ impl Cpu {
     }
 
     pub fn tick_timers(&mut self) {
-        if self.debug_time > 0 {
-            self.debug_time -= 1;
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
         }
         if self.sound_timer > 0 {
             self.sound_timer -= 1;
@@ -458,12 +407,12 @@ impl Cpu {
                     self.pc += 2;
                 }
             }
-            LdDTToVx(v_x) => *self.get_reg_mut(v_x) = self.debug_time,
+            LdDTToVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
             LDkey(v_x) => {
                 self.waiting_for_key = Some(v_x);
                 return Ok(CpuCode::StartWaitForKey);
             }
-            LdVxToDT(v_x) => self.debug_time = *self.get_reg(v_x),
+            LdVxToDT(v_x) => self.delay_timer = *self.get_reg(v_x),
             LdVxToST(v_x) => self.sound_timer = *self.get_reg(v_x),
             AddToI(v_x) => self.i_reg = self.i_reg.wrapping_add(*self.get_reg(v_x) as u16), // IIRC wrapping add on I is not possible
             LdSpr(v_x) => self.i_reg = Sprite::from_hex(*self.get_reg(v_x))? as u16,
@@ -592,10 +541,6 @@ impl Cpu {
 
     pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> Result<bool, &'static str> {
         self.display.draw_byte(x, y, byte)
-    }
-
-    pub fn set_keyboard(&mut self, keys: Keyboard) {
-        self.keys = keys;
     }
 }
 
