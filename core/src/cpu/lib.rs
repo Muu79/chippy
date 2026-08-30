@@ -27,13 +27,6 @@ impl Target {
         }
     }
 
-    pub const fn rpl_reg_count(&self) -> usize {
-        match self {
-            Chip8 => 0,
-            SChip8Legacy | SChip8Modern => 8,
-            XOChip => 16,
-        }
-    }
     pub(super) fn default_quirks(&self) -> Quirks {
         match self {
             SChip8Modern | XOChip => {
@@ -66,6 +59,7 @@ pub enum TargetQuirk {
     ClScrOnResChange = 1 << 6,
     LargeSpriteOnFx29 = 1 << 7,
     DrwCountsCollisionLines = 1 << 8,
+    ScrHalfOnLoRes = 1 << 9,
 }
 
 #[derive(Default)]
@@ -73,10 +67,10 @@ pub(crate) struct Quirks {
     pub(crate) quirk_map: u16,
 }
 
-pub(super) const RAM_SIZE: usize = 4096;
-pub(super) const STACK_SIZE: usize = 16;
-pub(super) const REG_COUNT: usize = 16;
-pub(super) const RPL_REG_COUNT: usize = 16;
+pub(super) static RAM_SIZE: usize = 4096;
+pub(super) static STACK_SIZE: usize = 16;
+pub(super) static REG_COUNT: usize = 16;
+pub(super) static RPL_REG_COUNT: usize = 16;
 
 pub struct Cpu {
     pub(super) ram: Box<[u8]>,
@@ -92,7 +86,7 @@ pub struct Cpu {
     pub(super) waiting_for_key: Option<VRegister>,
     pub(super) target: Target,
     pub(super) target_quirks: Quirks,
-    pub(super) rpl_regs: Box<[u8]>,
+    pub(super) rpl_regs: [u8; RPL_REG_COUNT],
     pub(super) rng: Rng,
 }
 
@@ -111,7 +105,6 @@ impl Default for Cpu {
 impl Cpu {
     pub fn new(target: Target) -> Self {
         let mut ram = vec![0; target.ram_size()].into_boxed_slice();
-        let mut rpl_regs = vec![0; target.rpl_reg_count()].into_boxed_slice();
         ram[..CHAR_MAP.len()].copy_from_slice(CHAR_MAP.as_slice()); // We always copy the full (small and large) char sprites, may be worth changing
         Self {
             ram,
@@ -127,7 +120,7 @@ impl Cpu {
             waiting_for_key: None,
             target,
             target_quirks: target.default_quirks(),
-            rpl_regs,
+            rpl_regs: [0; RPL_REG_COUNT],
             rng: Rng::new(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -351,10 +344,6 @@ impl Cpu {
                 *self.get_reg_mut(v_x) = self.get_rand_byte() & kk;
             }
             Drw(v_x, v_y, n) => {
-                if n == 0 && self.is_extended() {
-                    for row in 0..16 {}
-                    return Ok(CpuCode::Wait);
-                };
                 let (width, height) = self.display_dimensions();
                 let start = self.i_reg as usize;
                 let (col, row) = (
@@ -362,6 +351,28 @@ impl Cpu {
                     *self.get_reg(v_y) as usize % height,
                 );
                 let mut vf = 0;
+                if n == 0 && self.has_quirk(LargeSpriteOnFx29) {
+                    for i in 0..16 {
+                        let curr_idx = start + (i * 2);
+                        if curr_idx + 1 >= self.ram.len() || row + i >= height {
+                            vf += (i - 16) as u8;
+                            break;
+                        }
+                        let chomp =
+                            self.ram[curr_idx] as u16 | (self.ram[curr_idx + 1] as u16) << 8;
+                        vf += self.display.draw_chomp(row + i, col, chomp);
+                    }
+                    self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
+                        vf
+                    } else {
+                        (vf > 0) as u8
+                    });
+                    return if self.has_quirk(DispWait) {
+                        Ok(CpuCode::Wait)
+                    } else {
+                        Ok(CpuCode::Ok)
+                    };
+                };
                 for line in 0..n as usize {
                     if (start + line) >= self.ram.len() || row + line >= height {
                         break;
@@ -453,8 +464,18 @@ impl Cpu {
             Exit => {}
             LoRes => self.display.enter_lo_res(),
             HiRes => self.display.enter_hi_res(),
-            SaveFlags(v_x) => {}
-            LdFlags(v_x) => {}
+            SaveFlags(v_x) => {
+                let top_reg = self.get_top_rpl_reg(v_x);
+                for x in 0..=top_reg {
+                    self.rpl_regs[x] = *self.get_reg(VRegister(x));
+                }
+            }
+            LdFlags(v_x) => {
+                let top_reg = self.get_top_rpl_reg(v_x);
+                for x in 0..=top_reg {
+                    *self.get_reg_mut(v_x) = self.rpl_regs[x];
+                }
+            }
             // Octo Opcodes
             LdILong(nnn) => {}
             LdIVxToVy(v_x, v_y) => {}
@@ -463,6 +484,15 @@ impl Cpu {
         Ok(CpuCode::Ok)
     }
 
+    fn get_top_rpl_reg(&self, v_x: VRegister) -> usize {
+        if matches!(self.target, SChip8Legacy | SChip8Modern) {
+            v_x.0 % 8
+        } else if matches!(self.target, XOChip) {
+            v_x.0 % 16
+        } else {
+            0
+        }
+    }
     fn vf_flag(&mut self, pred: bool) {
         self.v_reg[0xF] = if pred { 1 } else { 0 };
     }
