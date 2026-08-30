@@ -7,18 +7,17 @@ use chippy_core::cpu::{Cpu, CpuCode, Target};
 use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use crossterm::{execute, SynchronizedUpdate};
+use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     supports_keyboard_enhancement,
 };
 use frontend::Frontend;
-use log::{error, warn};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::env;
 use std::error::Error;
-use std::io::{Stdout, stdout, stderr};
+use std::io::{Stdout, stdout};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -85,8 +84,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(arg) = env::args().nth(2) {
             if arg.to_lowercase() == "scmod" {
                 Target::SChip8Modern
-            } else if arg.to_lowercase() == "sclassic" {
-                Target::SChip8Classic
+            } else if arg.to_lowercase() == "scleg" {
+                Target::SChip8Legacy
+            } else if arg.to_lowercase() == "xoc" {
+                Target::XOChip
             } else {
                 Target::Chip8
             }
@@ -107,8 +108,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let elapsed = frame_start.elapsed();
         if elapsed < FRAME_TIME {
             sleep(FRAME_TIME - elapsed);
-        } else {
-            warn!("Frame took too long: {}ms", elapsed.as_millis());
         }
     }
 }
@@ -116,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend) -> Result<(), &'static str> {
     for _ in 0..CYCLES_PER_FRAME {
         match cpu.tick_cpu()? {
-            CpuCode::StartWaitForKey => {
+            CpuCode::Wait => {
                 frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
                 frontend.keys.reset_input_key();
                 break;

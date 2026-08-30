@@ -1,33 +1,52 @@
+use crate::Rng;
+use crate::cpu::encode_decode::{Opcode, VRegister, decode_instruction};
 use crate::hardware::{CHAR_MAP, Display, Keyboard, Sprite};
-use log::warn;
-use rand::random;
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
-
+use Target::*;
+use TargetQuirk::*;
+use std::time::{SystemTime, UNIX_EPOCH};
 /// Target for CPU to emulate
 #[derive(PartialEq, Copy, Clone)]
 pub enum Target {
     Chip8,
     SChip8Modern,
-    SChip8Classic,
+    SChip8Legacy,
+    XOChip,
 }
-use Target::*;
-use crate::cpu::encode_decode::{decode_opcode, Opcode, VRegister};
 
 impl Target {
     pub const fn start_address(&self) -> u16 {
         match self {
-            Chip8 | SChip8Classic | SChip8Modern => 0x200,
+            Chip8 | SChip8Legacy | SChip8Modern | XOChip => 0x200,
         }
     }
 
-    pub(super) fn default_quirks(&self) -> Quirks {
-        use TargetQuirk::*;
+    pub const fn ram_size(&self) -> usize {
         match self {
-            SChip8Modern => {
+            Chip8 | SChip8Legacy | SChip8Modern => 1 << 12,
+            XOChip => 1 << 16,
+        }
+    }
+
+    pub const fn rpl_reg_count(&self) -> usize {
+        match self {
+            Chip8 => 0,
+            SChip8Legacy | SChip8Modern => 8,
+            XOChip => 16,
+        }
+    }
+    pub(super) fn default_quirks(&self) -> Quirks {
+        match self {
+            SChip8Modern | XOChip => {
                 Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
             }
-            SChip8Classic => {
-                Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
+            SChip8Legacy => {
+                Quirks::default()
+                    | ShiftUsesVx
+                    | JumpUsesVx
+                    | HasScrollOps
+                    | ClScrOnResChange
+                    | LargeSpriteOnFx29
+                    | DispWait
             }
             Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
         }
@@ -45,6 +64,8 @@ pub enum TargetQuirk {
     JumpUsesVx = 1 << 4,
     HasScrollOps = 1 << 5,
     ClScrOnResChange = 1 << 6,
+    LargeSpriteOnFx29 = 1 << 7,
+    DrwCountsCollisionLines = 1 << 8,
 }
 
 #[derive(Default)]
@@ -55,9 +76,10 @@ pub(crate) struct Quirks {
 pub(super) const RAM_SIZE: usize = 4096;
 pub(super) const STACK_SIZE: usize = 16;
 pub(super) const REG_COUNT: usize = 16;
+pub(super) const RPL_REG_COUNT: usize = 16;
 
 pub struct Cpu {
-    pub(super) ram: [u8; RAM_SIZE],
+    pub(super) ram: Box<[u8]>,
     pub(super) v_reg: [u8; REG_COUNT],
     pub(super) i_reg: u16,
     pub(super) stack: Vec<u16>,
@@ -70,12 +92,16 @@ pub struct Cpu {
     pub(super) waiting_for_key: Option<VRegister>,
     pub(super) target: Target,
     pub(super) target_quirks: Quirks,
+    pub(super) rpl_regs: Box<[u8]>,
+    pub(super) rng: Rng,
 }
 
+#[repr(u8)]
 pub enum CpuCode {
     Ok = 0,
-    StartWaitForKey = 1,
+    Wait = 1,
     Skipped = 2,
+    Exit(&'static str) = 3,
 }
 impl Default for Cpu {
     fn default() -> Self {
@@ -84,8 +110,9 @@ impl Default for Cpu {
 }
 impl Cpu {
     pub fn new(target: Target) -> Self {
-        let mut ram = [0; RAM_SIZE];
-        ram[..CHAR_MAP.len()].copy_from_slice(CHAR_MAP.as_slice());
+        let mut ram = vec![0; target.ram_size()].into_boxed_slice();
+        let mut rpl_regs = vec![0; target.rpl_reg_count()].into_boxed_slice();
+        ram[..CHAR_MAP.len()].copy_from_slice(CHAR_MAP.as_slice()); // We always copy the full (small and large) char sprites, may be worth changing
         Self {
             ram,
             v_reg: [0; REG_COUNT],
@@ -100,9 +127,15 @@ impl Cpu {
             waiting_for_key: None,
             target,
             target_quirks: target.default_quirks(),
+            rpl_regs,
+            rng: Rng::new(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            ),
         }
     }
-
 
     pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
         if rom.len() + 0x200 > RAM_SIZE {
@@ -117,6 +150,7 @@ impl Cpu {
         self.v_reg.fill(0);
         self.i_reg = 0;
         self.stack_ptr = 0;
+        self.stack.clear();
         self.pc = self.target.start_address();
         self.sound_timer = 0;
         self.delay_timer = 0;
@@ -143,7 +177,6 @@ impl Cpu {
 
     fn push(&mut self, val: u16) {
         if self.stack_ptr == self.stack.len() as u16 {
-            warn!("Stack overflowed\nIncreasing stack size (this shouldn't happen)");
             self.stack.push(0);
         }
         self.stack[self.stack_ptr as usize] = val;
@@ -156,13 +189,6 @@ impl Cpu {
         }
         self.stack_ptr -= 1;
         Ok(self.stack[self.stack_ptr as usize])
-    }
-
-    fn fetch(&mut self) -> Result<u16, &'static str> {
-        let addr = self.pc;
-        let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
-        self.pc += 2;
-        Ok(opcode)
     }
 
     pub fn tick_timers(&mut self) {
@@ -197,19 +223,15 @@ impl Cpu {
             return Ok(CpuCode::Skipped);
         }
         let opcode = self.fetch()?;
-        let operation = decode_opcode(opcode);
+        let operation = decode_instruction(opcode);
         self.execute(operation)
     }
-    fn get_reg(&self, reg: VRegister) -> &u8 {
-        &self.v_reg[reg.0]
-    }
 
-    fn get_reg_mut(&mut self, reg: VRegister) -> &mut u8 {
-        &mut self.v_reg[reg.0]
-    }
-
-    fn display_dimensions(&self) -> (usize, usize) {
-        (self.display.width, self.display.height)
+    fn fetch(&mut self) -> Result<u16, &'static str> {
+        let addr = self.pc;
+        let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
+        self.pc += 2;
+        Ok(opcode)
     }
 
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
@@ -249,7 +271,7 @@ impl Cpu {
             LdByte(v_x, kk) => {
                 *self.get_reg_mut(v_x) = kk;
             }
-            AddByte(v_x, kk) => {
+            AddVxByte(v_x, kk) => {
                 *self.get_reg_mut(v_x) = self.get_reg(v_x).wrapping_add(kk);
             }
             LdReg(v_x, v_y) => {
@@ -260,34 +282,34 @@ impl Cpu {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) |= y;
                 if self.has_quirk(VfExtraReset) {
-                    self.set_vf(false);
+                    self.vf_flag(false);
                 }
             }
             And(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) &= y;
                 if self.has_quirk(VfExtraReset) {
-                    self.set_vf(false);
+                    self.vf_flag(false);
                 }
             }
             Xor(v_x, v_y) => {
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) ^= y;
                 if self.has_quirk(VfExtraReset) {
-                    self.set_vf(false);
+                    self.vf_flag(false);
                 }
             }
-            AddReg(v_x, v_y) => {
+            AddVxVy(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = x.wrapping_add(y);
-                self.set_vf((x as u16 + y as u16) > 0xff);
+                self.vf_flag((x as u16 + y as u16) > 0xff);
             }
             Sub(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = x.wrapping_sub(y);
-                self.set_vf(x >= y);
+                self.vf_flag(x >= y);
             }
             ShR(v_x, v_y) => {
                 let source = if self.has_quirk(ShiftUsesVx) {
@@ -296,13 +318,13 @@ impl Cpu {
                     *self.get_reg(v_y)
                 };
                 *self.get_reg_mut(v_x) = source >> 1;
-                self.set_vf(source & 0x1 == 0x1);
+                self.vf_flag(source & 0x1 == 0x1);
             }
             SubN(v_x, v_y) => {
                 let x = *self.get_reg(v_x);
                 let y = *self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = y.wrapping_sub(x);
-                self.set_vf(y >= x);
+                self.vf_flag(y >= x);
             }
             ShL(v_x, v_y) => {
                 let source = if self.has_quirk(ShiftUsesVx) {
@@ -311,7 +333,7 @@ impl Cpu {
                     *self.get_reg(v_y)
                 };
                 *self.get_reg_mut(v_x) = source << 1;
-                self.set_vf(source & 0x80 == 0x80);
+                self.vf_flag(source & 0x80 == 0x80);
             }
             LdToI(nnn) => {
                 self.i_reg = nnn;
@@ -325,30 +347,36 @@ impl Cpu {
                 };
                 self.pc = target;
             }
-            Rand(v_x, kk) => {
-                *self.get_reg_mut(v_x) = random::<u8>() & kk;
+            Rnd(v_x, kk) => {
+                *self.get_reg_mut(v_x) = self.get_rand_byte() & kk;
             }
             Drw(v_x, v_y, n) => {
-                let n = if n == 0 && self.is_extended() { 16 } else { n };
+                if n == 0 && self.is_extended() {
+                    for row in 0..16 {}
+                    return Ok(CpuCode::Wait);
+                };
                 let (width, height) = self.display_dimensions();
                 let start = self.i_reg as usize;
                 let (col, row) = (
                     *self.get_reg(v_x) as usize % width,
                     *self.get_reg(v_y) as usize % height,
                 );
-                let mut vf = false;
+                let mut vf = 0;
                 for line in 0..n as usize {
                     if (start + line) >= self.ram.len() || row + line >= height {
                         break;
                     }
                     let byte = self.ram[start + line];
-                    if let Ok(collision) = self.draw_byte(row + line, col, byte) {
-                        vf |= collision;
-                    } else {
-                        break;
-                    }
+                    vf += self.draw_byte(row + line, col, byte);
                 }
-                self.set_vf(vf);
+                self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
+                    vf
+                } else {
+                    (vf > 0) as u8
+                });
+                if self.has_quirk(DispWait) && !self.is_extended() {
+                    return Ok(CpuCode::Wait);
+                }
             }
             SkP(v_x) => {
                 if self.keys.is_pressed(*self.get_reg(v_x))? {
@@ -360,15 +388,25 @@ impl Cpu {
                     self.pc += 2;
                 }
             }
-            LdDTToVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
-            LDkey(v_x) => {
+            LdDTVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
+            LdKey(v_x) => {
                 self.waiting_for_key = Some(v_x);
-                return Ok(CpuCode::StartWaitForKey);
+                return Ok(CpuCode::Wait);
             }
-            LdVxToDT(v_x) => self.delay_timer = *self.get_reg(v_x),
-            LdVxToST(v_x) => self.sound_timer = *self.get_reg(v_x),
-            AddToI(v_x) => self.i_reg = self.i_reg.wrapping_add(*self.get_reg(v_x) as u16), // IIRC wrapping add on I is not possible
-            LdSpr(v_x) => self.i_reg = Sprite::from_hex(*self.get_reg(v_x))? as u16,
+            LdVxDT(v_x) => self.delay_timer = *self.get_reg(v_x),
+            LdVxST(v_x) => self.sound_timer = *self.get_reg(v_x), // IIRC wrapping add on I is not possible
+            AddIVx(v_x) => {
+                self.i_reg += *self.get_reg(v_x) as u16;
+            }
+            LdSpr(v_x) => {
+                let idx = *self.get_reg(v_x);
+                // SChip 1.0 Quirk
+                self.i_reg = if idx > 0xF && self.has_quirk(LargeSpriteOnFx29) {
+                    Sprite::from_hex(idx % 0x10, true)? as u16
+                } else {
+                    Sprite::from_hex(idx, false)? as u16
+                }
+            }
             LdDeci(v_x) => {
                 let val = *self.get_reg(v_x) as u16;
                 for pow in (0..3).rev() {
@@ -376,7 +414,7 @@ impl Cpu {
                         ((val / 10u16.pow(pow as u32)) % 10) as u8;
                 }
             }
-            LdVxToI(v_x) => {
+            LdVxI(v_x) => {
                 for i in 0..=v_x.0 {
                     self.ram[self.i_reg as usize + i] = *self.get_reg(VRegister(i));
                 }
@@ -384,7 +422,7 @@ impl Cpu {
                     self.i_reg += v_x.0 as u16 + 1;
                 }
             }
-            LdIToVx(v_x) => {
+            LdIVx(v_x) => {
                 for i in 0..=v_x.0 {
                     *self.get_reg_mut(VRegister(i)) = self.ram[self.i_reg as usize + i];
                 }
@@ -412,15 +450,25 @@ impl Cpu {
                 .get_screen_mut()
                 .iter_mut()
                 .for_each(|row| *row >>= 4),
+            Exit => {}
             LoRes => self.display.enter_lo_res(),
             HiRes => self.display.enter_hi_res(),
-            _ => unimplemented!(),
+            SaveFlags(v_x) => {}
+            LdFlags(v_x) => {}
+            // Octo Opcodes
+            LdILong(nnn) => {}
+            LdIVxToVy(v_x, v_y) => {}
+            LdVxToVyI(v_x, v_y) => {}
         };
         Ok(CpuCode::Ok)
     }
 
-    fn set_vf(&mut self, pred: bool) {
+    fn vf_flag(&mut self, pred: bool) {
         self.v_reg[0xF] = if pred { 1 } else { 0 };
+    }
+
+    fn set_vf(&mut self, num: u8) {
+        self.v_reg[0xF] = num;
     }
 
     pub fn write_hex(&mut self, line: usize, hex: u32) -> Result<(), &'static str> {
@@ -440,15 +488,19 @@ impl Cpu {
         self.display.draw_sprite(x, y, sprite, &self.ram)
     }
 
-    pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> Result<bool, &'static str> {
+    pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> u8 {
         self.display.draw_byte(x, y, byte)
+    }
+
+    pub fn draw_chomp(&mut self, x: usize, y: usize, chomp: u16) -> u8 {
+        self.display.draw_chomp(x, y, chomp)
     }
 }
 
 pub fn parse_hex(hex: u32) -> [Sprite; 8] {
     let mut ans = [Sprite::default(); 8];
     for (i, sprite) in ans.iter_mut().enumerate() {
-        *sprite = Sprite::from_hex(((hex >> ((7 - i) * 4)) & 0xF) as u8).unwrap_or_default();
+        *sprite = Sprite::from_hex(((hex >> ((7 - i) * 4)) & 0xF) as u8, false).unwrap_or_default();
     }
     ans
 }
