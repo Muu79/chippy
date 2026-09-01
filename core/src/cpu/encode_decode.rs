@@ -61,6 +61,9 @@ pub enum Opcode {
     LdILong(u16),
     LdIVxToVy(VRegister, VRegister),
     LdVxToVyI(VRegister, VRegister),
+    SelectPlane(u8),
+    StoreAudioBuffer,
+    SetPitch(VRegister)
 }
 
 pub const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {
@@ -113,6 +116,9 @@ pub fn decode_instruction(encoded_instruction: u16) -> Opcode {
         (0xD, _, _, _) => Drw(x_reg, y_reg, n),
         (0xE, _, 0x9, 0xE) => SkP(x_reg),
         (0xE, _, 0xA, 0x1) => SkNP(x_reg),
+        (0xF, n, 0x0, 0x1) => SelectPlane(n),
+        (0xF, 0x0, 0x0, 0x2) => StoreAudioBuffer,
+        (0xF, _, 0x3, 0xA) => SetPitch(x_reg),
         (0xF, _, 0x0, 0x7) => LdDTVx(x_reg),
         (0xF, _, 0x0, 0xA) => LdKey(x_reg),
         (0xF, _, 0x1, 0x5) => LdVxDT(x_reg),

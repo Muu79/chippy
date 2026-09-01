@@ -2,6 +2,7 @@ use chippy_core::hardware::Keyboard;
 use crossterm::event;
 use crossterm::event::Event;
 use std::time::Duration;
+use ratatui::style::Color;
 
 /// Represents the frontend component of the system, which handles display and keyboard state.
 ///
@@ -22,6 +23,10 @@ use std::time::Duration;
 pub struct Frontend {
     pub(crate) keys: Keyboard,
     pub(crate) debug_mode: bool,
+    pub(crate) background_color: Color,
+    pub(crate) main_color: Color,
+    pub(crate) sub_color: Color,
+    pub(crate) overlap_color: Color,
 }
 
 impl Frontend {
@@ -30,6 +35,10 @@ impl Frontend {
         Frontend {
             keys: Keyboard::new(),
             debug_mode: false,
+            background_color: Color::Rgb(0xA1, 0x6C, 0x00),
+            main_color: Color::Rgb(0xFF, 0xAB, 0x00),
+            sub_color: Color::Black,
+            overlap_color: Color::Black,
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::Rng;
 use crate::cpu::encode_decode::Opcode::LdILong;
 use crate::cpu::encode_decode::{Opcode, VRegister, decode_instruction};
-use crate::hardware::{CHAR_MAP, Direction, Display, Keyboard, Sprite};
+use crate::hardware::{CHAR_MAP, Direction, Display, Keyboard, Sprite, TargetPlane};
 use Target::*;
 use TargetQuirk::*;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,14 +38,7 @@ impl Target {
 
     pub(super) fn default_quirks(&self) -> Quirks {
         match self {
-            SChip8Modern | XOChip => {
-                Quirks::default()
-                    | ShiftUsesVx
-                    | JumpUsesVx
-                    | HasScrollOps
-                    | ClScrOnResChange
-                    | LoResWideSpriteOnDrwXY0
-            }
+            Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
             SChip8Legacy => {
                 Quirks::default()
                     | ShiftUsesVx
@@ -57,7 +50,16 @@ impl Target {
                     | ScrHalfOnLoRes
                     | DrawSpriteOnDrwXY0
             }
-            Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
+            SChip8Modern => {
+                Quirks::default()
+                    | ShiftUsesVx
+                    | JumpUsesVx
+                    | HasScrollOps
+                    | ClScrOnResChange
+                    | LoResWideSpriteOnDrwXY0
+                    | DrawSpriteOnDrwXY0
+            }
+            XOChip => Quirks::default() | IncrIOnLd | HasScrollOps,
         }
     }
 }
@@ -80,6 +82,7 @@ pub enum TargetQuirk {
     ScrHalfOnLoRes = 1 << 9,
     DrawSpriteOnDrwXY0 = 1 << 10,
     LoResWideSpriteOnDrwXY0 = 1 << 11,
+    WrapPixels = 1 << 12,
 }
 
 #[derive(Default)]
@@ -397,7 +400,13 @@ impl Cpu {
 
                 let draws_16x16 = n == 0 && self.has_quirk(DrawSpriteOnDrwXY0);
                 let sprite_h: usize = if draws_16x16 { 16 } else { n as usize };
-                let row_bytes: usize = if draws_16x16 { 2 } else { 1 };
+                let sprite_width: usize = if draws_16x16
+                    && (self.is_extended() || self.has_quirk(LoResWideSpriteOnDrwXY0))
+                {
+                    2
+                } else {
+                    1
+                };
 
                 let mut addr = self.i_reg as usize;
                 let mut vf: u8 = 0;
@@ -405,17 +414,18 @@ impl Cpu {
                 for plane in self.display.get_plane_idx() {
                     let chomps: Vec<u16> = (0..sprite_h)
                         .map(|r| {
-                            let base = addr + r * row_bytes;
-                            if row_bytes == 2 {
-                                ((self.ram[base] as u16) << 8) | self.ram[base + 1] as u16
+                            let base = addr + r * sprite_width;
+                            if sprite_width == 2 {
+                                (self.ram[base].reverse_bits() as u16)
+                                    | (self.ram[base + 1].reverse_bits() as u16) << 8
                             } else {
-                                self.ram[base] as u16
+                                self.ram[base].reverse_bits() as u16
                             }
                         })
                         .collect();
 
                     vf += self.display.draw_sprite(row, col, &chomps, plane);
-                    addr += sprite_h * row_bytes; // only advances for planes actually consumed
+                    addr += sprite_h * sprite_width; // only advances for planes actually consumed
                 }
 
                 self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
@@ -546,6 +556,14 @@ impl Cpu {
                     *self.get_reg_mut(VRegister(reg)) = self.ram[start + idx];
                 }
             }
+            SelectPlane(n) => self.display.set_targeted_plane(match n & 0b11 {
+                0b11 => TargetPlane::Both,
+                0b01 => TargetPlane::Plane1,
+                0b10 => TargetPlane::Plane2,
+                _ => TargetPlane::None,
+            }),
+            StoreAudioBuffer => {}
+            SetPitch(_) => {}
         };
         Ok(CpuCode::Ok)
     }

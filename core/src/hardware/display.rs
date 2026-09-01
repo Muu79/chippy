@@ -117,22 +117,28 @@ impl Display {
             .into_iter()
             .for_each(|plane| func(&mut self.planes[plane]))
     }
-
-    pub fn draw_line(&mut self, row: usize, col: usize, chomp: u16, plane: usize) -> bool {
-        let mask = (chomp.reverse_bits() as u128) << col;
+    
+    pub(crate) fn set_targeted_plane(&mut self, plane: TargetPlane) {
+        self.targeted_plane = plane;
+    }
+    pub fn draw_line(&mut self, row: usize, col: usize, mask: u16, plane: usize) -> bool {
+        let mask = (mask as u128) << col;
         let mut collisions = 0;
         let buf_line = &mut self.planes[plane][row];
         collisions += ((*buf_line & mask) != 0) as u8;
         *buf_line ^= mask;
         collisions > 0
     }
-    pub fn draw_sprite(&mut self, row: usize, col: usize, chomps: &[u16], plane: usize) -> u8 {
-        chomps
+
+    pub fn draw_sprite(&mut self, row: usize, col: usize, masks: &[u16], plane: usize) -> u8 {
+        masks
             .iter()
             .enumerate()
-            .fold(0, |collisions, (i, &chomp)| {
+            .fold(0u8, |collisions, (i, &mask)| {
                 let curr = row + i;
-                if curr >= self.height || self.draw_line(row, col, chomp, plane) {
+                if curr >= self.height {
+                    collisions
+                } else if self.draw_line(curr, col, mask, plane) {
                     collisions + 1
                 } else {
                     collisions
@@ -180,7 +186,7 @@ impl Display {
         });
     }
 
-    // Scrolling left and right is normally by 4 pixels, but some implementations expect 2 pixels 
+    // Scrolling left and right is normally by 4 pixels, but some implementations expect 2 pixels
     // on lores, so we add the amount arg to account for that.
     fn scroll_left(&mut self, amount: usize) {
         self.for_each_selected_plane(|plane| plane.iter_mut().for_each(|row| *row >>= amount));
