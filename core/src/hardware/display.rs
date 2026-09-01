@@ -1,4 +1,4 @@
-use crate::cpu::Target;
+use crate::cpu::TargetQuirk::ScrHalfOnLoRes;
 use std::fmt::Write;
 use std::iter::{Iterator, repeat_n};
 
@@ -24,17 +24,39 @@ use std::iter::{Iterator, repeat_n};
 /// Access to the `height`, `width`, and `capacity` fields is restricted to the current crate, while
 /// the `buffer` remains private to encapsulate the display's graphical state.
 pub struct Display {
-    buffer: [u128; 64],
+    plane_1: [u128; 64],
+    planes: [[u128; 64]; 2],
+    targeted_plane: TargetPlane,
     pub(crate) width: usize,
     pub(crate) height: usize,
     is_extended: bool,
 }
 
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// We support up to 4 planes, but normally only planes 1 and 2 are used.
+#[derive(Default, Copy, Clone)]
+#[repr(u8)]
+pub enum TargetPlane {
+    None = 0,
+    #[default]
+    Plane1 = 0b01,
+    Plane2 = 0b10,
+    Both = 0b11,
+}
+
 impl Display {
     /// Create a new [`Display`] based on the supplied [`Target`]
-    pub fn new(target: &Target) -> Display {
+    pub fn new() -> Display {
         Display {
-            buffer: [0u128; 64],
+            plane_1: [0u128; 64],
+            planes: [[0u128; 64]; 2],
+            targeted_plane: TargetPlane::Plane1,
             width: 64,
             height: 32,
             is_extended: false,
@@ -42,26 +64,25 @@ impl Display {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.buffer.fill(0);
+        self.planes.iter_mut().for_each(|plane| plane.fill(0))
     }
-    pub fn get_screen(&self) -> &[u128] {
-        &self.buffer
+    pub fn get_screen(&self) -> (&[u128], &[u128]) {
+        (self.planes[0].as_slice(), self.planes[1].as_slice())
     }
-    pub fn get_screen_mut(&mut self) -> &mut [u128] {
-        &mut self.buffer
+    pub fn get_screen_mut(&mut self) -> (&mut [u128], &mut [u128]) {
+        let (left, right) = self.planes.split_at_mut(1);
+        (left[0].as_mut(), right[0].as_mut())
     }
 
     pub fn enter_hi_res(&mut self) {
         self.width = 128;
         self.height = 64;
-        self.clear();
         self.is_extended = true;
     }
 
     pub fn enter_lo_res(&mut self) {
         self.width = 64;
         self.height = 32;
-        self.clear();
         self.is_extended = false;
     }
 
@@ -73,91 +94,100 @@ impl Display {
         (self.width, self.height, self.width * self.height)
     }
 
-    pub fn get_height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.height
     }
 
-    pub fn get_width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.width
     }
 
-    pub fn draw_byte(&mut self, row: usize, col: usize, byte: u8) -> u8 {
-        let row = row % self.height;
-        let col = col % self.width;
-        let mask = (byte.reverse_bits() as u128) << col;
-        let buf_line = &mut self.buffer[row];
-        let collisions = (*buf_line & mask).count_ones() as u8;
-        *buf_line ^= mask;
-        collisions
+    pub(crate) fn get_plane_idx(&mut self) -> Vec<usize> {
+        use TargetPlane::*;
+        match self.targeted_plane {
+            None => vec![],
+            Plane1 => vec![0],
+            Plane2 => vec![1],
+            Both => vec![0, 1],
+        }
     }
 
-    pub fn draw_chomp(&mut self, row: usize, col: usize, chomp: u16) -> u8 {
-        let row = row % self.height;
-        let col = col % self.width;
+    pub(crate) fn for_each_selected_plane<F: FnMut(&mut [u128]) -> ()>(&mut self, mut func: F) {
+        self.get_plane_idx()
+            .into_iter()
+            .for_each(|plane| func(&mut self.planes[plane]))
+    }
+
+    pub fn draw_line(&mut self, row: usize, col: usize, chomp: u16, plane: usize) -> bool {
         let mask = (chomp.reverse_bits() as u128) << col;
-        let buf_line = &mut self.buffer[row];
-        let collision = if col + 16 >= self.width { 1 } else { 0 };
+        let mut collisions = 0;
+        let buf_line = &mut self.planes[plane][row];
+        collisions += ((*buf_line & mask) != 0) as u8;
         *buf_line ^= mask;
-        collision
+        collisions > 0
+    }
+    pub fn draw_sprite(&mut self, row: usize, col: usize, chomps: &[u16], plane: usize) -> u8 {
+        chomps
+            .iter()
+            .enumerate()
+            .fold(0, |collisions, (i, &chomp)| {
+                let curr = row + i;
+                if curr >= self.height || self.draw_line(row, col, chomp, plane) {
+                    collisions + 1
+                } else {
+                    collisions
+                }
+            })
     }
 
-    pub fn draw_n_bytes(
-        &mut self,
-        mut row: usize,
-        col: usize,
-        n: usize,
-        bytes: impl Iterator<Item = u8>,
-    ) -> u8 {
-        let mut collision_count = if self.height > row + n {
-            ((row + n) - self.height) as u8
-        } else {
-            0
-        };
-        for byte in bytes.take(n) {
-            if row >= self.height {
-                break;
-            }
-            let mask = (byte.reverse_bits() as u128) << col;
-            let buf_line = &mut self.buffer[row];
-            collision_count += (*buf_line & mask).count_ones() as u8;
-            *buf_line ^= mask;
-            row += 1;
+    pub fn scroll_selected_planes_by(&mut self, amount: usize, direction: Direction) {
+        if amount == 0 {
+            return;
         }
-        collision_count
+        match direction {
+            Direction::Left => {
+                self.scroll_left(amount);
+            }
+            Direction::Right => {
+                self.scroll_right(amount);
+            }
+            Direction::Up => {
+                self.scroll_up(amount);
+            }
+            Direction::Down => {
+                self.scroll_down(amount);
+            }
+        }
     }
-    // pub fn draw_n_chomps(
-    //     &mut self,
-    //     row: usize,
-    //     col: usize,
-    //     n: usize,
-    //     chomps: impl Iterator<Item = u16>,
-    // ) -> u8 {
-    //     let mut collision_count = 0;
-    //     for chomp in chomps.take(n) {}
-    // }
 
-    pub fn draw_sprite(
-        &mut self,
-        row: usize,
-        col: usize,
-        sprite: &Sprite,
-        ram: &[u8],
-    ) -> Result<bool, &'static str> {
-        let sprite_start = *sprite as usize;
-        let mut collision_count = 0;
-        let mut line = 0;
-        let (row, col) = (row % 32, col % 64);
-        loop {
-            let byte = ram
-                .get(sprite_start + line)
-                .ok_or("Invalid sprite address")?;
-            collision_count += self.draw_byte(row + line, col, *byte);
-            line += 1;
-            if line >= 5 || (line + row) >= self.height {
-                break;
+    fn scroll_up(&mut self, amount: usize) {
+        let height = self.height;
+        self.for_each_selected_plane(|plane| {
+            for curr_row in 0..height.saturating_sub(amount) {
+                plane[curr_row] = plane[curr_row + amount];
             }
-        }
-        Ok(collision_count > 0)
+            plane.iter_mut().rev().take(amount).for_each(|row| *row = 0);
+        });
+    }
+
+    fn scroll_down(&mut self, amount: usize) {
+        let height = self.height;
+        self.for_each_selected_plane(|plane| {
+            for curr_row in (0..height.saturating_sub(amount)).rev() {
+                plane[curr_row + amount] = plane[curr_row];
+            }
+            plane.iter_mut().take(amount).for_each(|row| *row = 0);
+        });
+    }
+
+    // Scrolling left and right is normally by 4 pixels, but some implementations expect 2 pixels 
+    // on lores, so we add the amount arg to account for that.
+    fn scroll_left(&mut self, amount: usize) {
+        self.for_each_selected_plane(|plane| plane.iter_mut().for_each(|row| *row >>= amount));
+    }
+
+    fn scroll_right(&mut self, amount: usize) {
+        self.for_each_selected_plane(|plane| plane.iter_mut().for_each(|row| *row <<= amount));
     }
 }
 
@@ -169,7 +199,7 @@ impl std::fmt::Display for Display {
         f.write_char('\n')?;
         for row in 0..self.height {
             f.write_char('\u{2502}')?;
-            let line = self.buffer[row];
+            let line = self.plane_1[row];
             f.write_str(&(0..self.width).fold(String::new(), |mut acc, offset| {
                 if (1 << offset) & line != 0 {
                     acc.push('*')

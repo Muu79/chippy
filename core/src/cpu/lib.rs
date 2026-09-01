@@ -1,9 +1,11 @@
 use crate::Rng;
+use crate::cpu::encode_decode::Opcode::LdILong;
 use crate::cpu::encode_decode::{Opcode, VRegister, decode_instruction};
-use crate::hardware::{CHAR_MAP, Display, Keyboard, Sprite};
+use crate::hardware::{CHAR_MAP, Direction, Display, Keyboard, Sprite};
 use Target::*;
 use TargetQuirk::*;
 use std::time::{SystemTime, UNIX_EPOCH};
+
 /// Target for CPU to emulate
 #[derive(PartialEq, Copy, Clone)]
 pub enum Target {
@@ -27,10 +29,22 @@ impl Target {
         }
     }
 
+    pub const fn is_extendable(&self) -> bool {
+        match self {
+            Chip8 => false,
+            SChip8Legacy | XOChip | SChip8Modern => true,
+        }
+    }
+
     pub(super) fn default_quirks(&self) -> Quirks {
         match self {
             SChip8Modern | XOChip => {
-                Quirks::default() | ShiftUsesVx | JumpUsesVx | HasScrollOps | ClScrOnResChange
+                Quirks::default()
+                    | ShiftUsesVx
+                    | JumpUsesVx
+                    | HasScrollOps
+                    | ClScrOnResChange
+                    | LoResWideSpriteOnDrwXY0
             }
             SChip8Legacy => {
                 Quirks::default()
@@ -40,6 +54,8 @@ impl Target {
                     | ClScrOnResChange
                     | LargeSpriteOnFx29
                     | DispWait
+                    | ScrHalfOnLoRes
+                    | DrawSpriteOnDrwXY0
             }
             Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
         }
@@ -49,7 +65,9 @@ impl Target {
 #[repr(u16)]
 #[derive(Default, Clone, Copy)]
 pub enum TargetQuirk {
+    // Making None default means any quirk would cause it to return false for .has_quirk()
     #[default]
+    NoQuirk = 0,
     ShiftUsesVx = 1 << 0,
     IncrIOnLd = 1 << 1,
     VfExtraReset = 1 << 2,
@@ -60,6 +78,8 @@ pub enum TargetQuirk {
     LargeSpriteOnFx29 = 1 << 7,
     DrwCountsCollisionLines = 1 << 8,
     ScrHalfOnLoRes = 1 << 9,
+    DrawSpriteOnDrwXY0 = 1 << 10,
+    LoResWideSpriteOnDrwXY0 = 1 << 11,
 }
 
 #[derive(Default)]
@@ -86,8 +106,12 @@ pub struct Cpu {
     pub(super) waiting_for_key: Option<VRegister>,
     pub(super) target: Target,
     pub(super) target_quirks: Quirks,
-    pub(super) rpl_regs: [u8; RPL_REG_COUNT],
     pub(super) rng: Rng,
+    // Super-Chip props
+    pub(super) rpl_regs: [u8; RPL_REG_COUNT],
+    // XO-Chip props
+    pub(super) audio_pattern: [u8; 16],
+    pub(super) pitch: u16,
 }
 
 #[repr(u8)]
@@ -116,7 +140,7 @@ impl Cpu {
             sound_timer: 0,
             delay_timer: 0,
             keys: Keyboard::new(),
-            display: Display::new(&target),
+            display: Display::new(),
             waiting_for_key: None,
             target,
             target_quirks: target.default_quirks(),
@@ -127,6 +151,8 @@ impl Cpu {
                     .unwrap()
                     .as_secs(),
             ),
+            audio_pattern: [0; 16],
+            pitch: 4000,
         }
     }
 
@@ -149,6 +175,8 @@ impl Cpu {
         self.delay_timer = 0;
         self.keys.reset();
         self.display.clear();
+        self.audio_pattern = [0; 16];
+        self.pitch = 4000;
     }
 
     pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {
@@ -216,7 +244,14 @@ impl Cpu {
             return Ok(CpuCode::Skipped);
         }
         let opcode = self.fetch()?;
-        let operation = decode_instruction(opcode);
+        let operation = if opcode == 0xF000 {
+            let idx = self.pc as usize;
+            let chomp = (self.ram[idx] as u16) << 8 | self.ram[idx + 1] as u16;
+            self.pc += 2;
+            LdILong(chomp)
+        } else {
+            decode_instruction(opcode)
+        };
         self.execute(operation)
     }
 
@@ -227,6 +262,16 @@ impl Cpu {
         Ok(opcode)
     }
 
+    fn skip_instruction(&mut self) {
+        let next_opcode =
+            (self.ram[self.pc as usize] as u16) << 8 | self.ram[self.pc as usize + 1] as u16;
+        // In XO-chip we need to account for 32bit wide opcode F000 aaaa
+        if next_opcode == 0xF000 && matches!(self.target, XOChip) {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
         use Opcode::*;
         use TargetQuirk::*;
@@ -243,22 +288,22 @@ impl Cpu {
             }
             SEByte(v_x, kk) => {
                 if self.get_reg(v_x) == &kk {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             SNEByte(v_x, kk) => {
                 if self.get_reg(v_x) != &kk {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             SEReg(v_x, v_y) => {
                 if self.get_reg(v_x) == self.get_reg(v_y) {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             SNEReg(v_x, v_y) => {
                 if self.get_reg(v_x) != self.get_reg(v_y) {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             LdByte(v_x, kk) => {
@@ -345,58 +390,52 @@ impl Cpu {
             }
             Drw(v_x, v_y, n) => {
                 let (width, height) = self.display_dimensions();
-                let start = self.i_reg as usize;
                 let (col, row) = (
                     *self.get_reg(v_x) as usize % width,
                     *self.get_reg(v_y) as usize % height,
                 );
-                let mut vf = 0;
-                if n == 0 && self.has_quirk(LargeSpriteOnFx29) {
-                    for i in 0..16 {
-                        let curr_idx = start + (i * 2);
-                        if curr_idx + 1 >= self.ram.len() || row + i >= height {
-                            vf += (i - 16) as u8;
-                            break;
-                        }
-                        let chomp =
-                            self.ram[curr_idx] as u16 | (self.ram[curr_idx + 1] as u16) << 8;
-                        vf += self.display.draw_chomp(row + i, col, chomp);
-                    }
-                    self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
-                        vf
-                    } else {
-                        (vf > 0) as u8
-                    });
-                    return if self.has_quirk(DispWait) {
-                        Ok(CpuCode::Wait)
-                    } else {
-                        Ok(CpuCode::Ok)
-                    };
-                };
-                for line in 0..n as usize {
-                    if (start + line) >= self.ram.len() || row + line >= height {
-                        break;
-                    }
-                    let byte = self.ram[start + line];
-                    vf += self.draw_byte(row + line, col, byte);
+
+                let draws_16x16 = n == 0 && self.has_quirk(DrawSpriteOnDrwXY0);
+                let sprite_h: usize = if draws_16x16 { 16 } else { n as usize };
+                let row_bytes: usize = if draws_16x16 { 2 } else { 1 };
+
+                let mut addr = self.i_reg as usize;
+                let mut vf: u8 = 0;
+
+                for plane in self.display.get_plane_idx() {
+                    let chomps: Vec<u16> = (0..sprite_h)
+                        .map(|r| {
+                            let base = addr + r * row_bytes;
+                            if row_bytes == 2 {
+                                ((self.ram[base] as u16) << 8) | self.ram[base + 1] as u16
+                            } else {
+                                self.ram[base] as u16
+                            }
+                        })
+                        .collect();
+
+                    vf += self.display.draw_sprite(row, col, &chomps, plane);
+                    addr += sprite_h * row_bytes; // only advances for planes actually consumed
                 }
+
                 self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
                     vf
                 } else {
                     (vf > 0) as u8
                 });
+
                 if self.has_quirk(DispWait) && !self.is_extended() {
                     return Ok(CpuCode::Wait);
                 }
             }
             SkP(v_x) => {
                 if self.keys.is_pressed(*self.get_reg(v_x))? {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             SkNP(v_x) => {
                 if !self.keys.is_pressed(*self.get_reg(v_x))? {
-                    self.pc += 2;
+                    self.skip_instruction()
                 }
             }
             LdDTVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
@@ -443,24 +482,32 @@ impl Cpu {
             }
             // SCHIP Opcodes
             ScD(n) => {
-                let n = n as usize;
-                let height = self.display.get_height();
-                let buff = self.display.get_screen_mut();
-                for curr_row in (0..height.saturating_sub(n)).rev() {
-                    buff[curr_row + n] = buff[curr_row];
-                }
-                buff.iter_mut().take(n).for_each(|row| *row = 0);
+                let scr_by = (if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    n / 2
+                } else {
+                    n
+                }) as usize;
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Down)
             }
-            ScR => self
-                .display
-                .get_screen_mut()
-                .iter_mut()
-                .for_each(|row| *row <<= 4),
-            ScL => self
-                .display
-                .get_screen_mut()
-                .iter_mut()
-                .for_each(|row| *row >>= 4),
+            ScR => {
+                let scr_by = if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    2
+                } else {
+                    4
+                };
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Right)
+            }
+            ScL => {
+                let scr_by = if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    2
+                } else {
+                    4
+                };
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Left)
+            }
             Exit => {}
             LoRes => self.display.enter_lo_res(),
             HiRes => self.display.enter_hi_res(),
@@ -477,9 +524,28 @@ impl Cpu {
                 }
             }
             // Octo Opcodes
-            LdILong(nnn) => {}
-            LdIVxToVy(v_x, v_y) => {}
-            LdVxToVyI(v_x, v_y) => {}
+            ScU(n) => {
+                let scr_by = (if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    n / 2
+                } else {
+                    n
+                }) as usize;
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Up)
+            }
+            LdILong(chomp) => self.i_reg = chomp,
+            LdIVxToVy(v_x, v_y) => {
+                let start = self.i_reg as usize;
+                for (idx, reg) in (v_x.0..=v_y.0).enumerate() {
+                    self.ram[start + idx] = *self.get_reg(VRegister(reg));
+                }
+            }
+            LdVxToVyI(v_x, v_y) => {
+                let start = self.i_reg as usize;
+                for (idx, reg) in (v_x.0..=v_y.0).enumerate() {
+                    *self.get_reg_mut(VRegister(reg)) = self.ram[start + idx];
+                }
+            }
         };
         Ok(CpuCode::Ok)
     }
@@ -499,31 +565,6 @@ impl Cpu {
 
     fn set_vf(&mut self, num: u8) {
         self.v_reg[0xF] = num;
-    }
-
-    pub fn write_hex(&mut self, line: usize, hex: u32) -> Result<(), &'static str> {
-        for (i, sprite) in parse_hex(hex).iter().enumerate() {
-            self.display
-                .draw_sprite(line * 5, i * 8, sprite, &self.ram)?;
-        }
-        Ok(())
-    }
-
-    pub fn draw_sprite(
-        &mut self,
-        x: usize,
-        y: usize,
-        sprite: &Sprite,
-    ) -> Result<bool, &'static str> {
-        self.display.draw_sprite(x, y, sprite, &self.ram)
-    }
-
-    pub fn draw_byte(&mut self, x: usize, y: usize, byte: u8) -> u8 {
-        self.display.draw_byte(x, y, byte)
-    }
-
-    pub fn draw_chomp(&mut self, x: usize, y: usize, chomp: u16) -> u8 {
-        self.display.draw_chomp(x, y, chomp)
     }
 }
 

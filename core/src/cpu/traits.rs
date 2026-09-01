@@ -1,6 +1,8 @@
+use std::collections::Bound;
 use crate::cpu::{Cpu, TargetQuirk};
 use std::fmt::Display;
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, RangeBounds};
+use crate::cpu::encode_decode::VRegister;
 use crate::cpu::lib::Quirks;
 
 impl Display for Cpu {

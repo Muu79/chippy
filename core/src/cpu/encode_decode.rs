@@ -57,6 +57,7 @@ pub enum Opcode {
     SaveFlags(VRegister),
     LdFlags(VRegister),
     // Octo Instructions
+    ScU(u8),
     LdILong(u16),
     LdIVxToVy(VRegister, VRegister),
     LdVxToVyI(VRegister, VRegister),
@@ -74,23 +75,26 @@ pub fn decode_instruction(encoded_instruction: u16) -> Opcode {
     let nibbles = nibble_op_code(encoded_instruction);
     let n = nibbles.3;
     let kk = encoded_instruction as u8;
-    let nnn = encoded_instruction & 0xfff;
+    let mmm = encoded_instruction & 0xfff;
     let (x_reg, y_reg) = (VRegister(nibbles.1 as usize), VRegister(nibbles.2 as usize));
     match nibbles {
-        (0, 0, 0, 0) => NoOp,
-        (0, 0, 0xC, _) => ScD(n),
-        (0, 0, 0xE, 0) => ClS,
-        (0, 0, 0xE, 0xE) => Ret,
-        (0, 0, 0xF, 0xB) => ScR,
-        (0, 0, 0xF, 0xC) => ScL,
-        (0, 0, 0xF, 0xD) => Exit,
-        (0, 0, 0xF, 0xE) => LoRes,
-        (0, 0, 0xF, 0xF) => HiRes,
-        (0x1, _, _, _) => Jp(nnn),
-        (0x2, _, _, _) => Call(nnn),
+        (0x0, 0x0, 0x0, 0x0) => NoOp,
+        (0x0, 0x0, 0xC, _) => ScD(n),
+        (0x0, 0x0, 0xD, _) => ScU(n),
+        (0x0, 0x0, 0xE, 0x0) => ClS,
+        (0x0, 0x0, 0xE, 0xE) => Ret,
+        (0x0, 0x0, 0xF, 0xB) => ScR,
+        (0x0, 0x0, 0xF, 0xC) => ScL,
+        (0x0, 0x0, 0xF, 0xD) => Exit,
+        (0x0, 0x0, 0xF, 0xE) => LoRes,
+        (0x0, 0x0, 0xF, 0xF) => HiRes,
+        (0x1, _, _, _) => Jp(mmm),
+        (0x2, _, _, _) => Call(mmm),
         (0x3, _, _, _) => SEByte(x_reg, kk),
         (0x4, _, _, _) => SNEByte(x_reg, kk),
-        (0x5, _, _, _) => SEReg(x_reg, y_reg),
+        (0x5, _, _, 0x0) => SEReg(x_reg, y_reg),
+        (0x5, _, _, 2) => LdIVxToVy(x_reg, y_reg),
+        (0x5, _, _, 3) => LdVxToVyI(x_reg, y_reg),
         (0x6, _, _, _) => LdByte(x_reg, kk),
         (0x7, _, _, _) => AddVxByte(x_reg, kk),
         (0x8, _, _, 0x0) => LdReg(x_reg, y_reg),
@@ -102,9 +106,9 @@ pub fn decode_instruction(encoded_instruction: u16) -> Opcode {
         (0x8, _, _, 0x6) => ShR(x_reg, y_reg),
         (0x8, _, _, 0x7) => SubN(x_reg, y_reg),
         (0x8, _, _, 0xE) => ShL(x_reg, y_reg),
-        (0x9, _, _, 0) => SNEReg(x_reg, y_reg),
-        (0xA, _, _, _) => LdToI(nnn),
-        (0xB, _, _, _) => JpReg(nnn),
+        (0x9, _, _, 0x0) => SNEReg(x_reg, y_reg),
+        (0xA, _, _, _) => LdToI(mmm),
+        (0xB, _, _, _) => JpReg(mmm),
         (0xC, _, _, _) => Rnd(x_reg, kk),
         (0xD, _, _, _) => Drw(x_reg, y_reg, n),
         (0xE, _, 0x9, 0xE) => SkP(x_reg),
@@ -127,7 +131,7 @@ pub fn decode_instruction(encoded_instruction: u16) -> Opcode {
 pub fn encode_opcode(decoded_opcode: Opcode) -> u16 {
     use Opcode::*;
     match decoded_opcode {
-        NoOp => 0,
+        NoOp => 0x0,
         ScD(n) => (0x00C0 | (n & 0xF)) as u16,
         ClS => 0x00E0,
         Ret => 0x00EE,
@@ -171,6 +175,6 @@ pub fn encode_opcode(decoded_opcode: Opcode) -> u16 {
         LdVxI(x_reg) => 0xF055 | (u16::from(x_reg) << 8),
         LdIVx(x_reg) => 0xF065 | (u16::from(x_reg) << 8),
         LdILong(_) => panic!("LdILong not supported in encode_opcode, use encode_as_bytes instead"),
-        _ => 0,
+        _ => 0x0,
     }
 }
