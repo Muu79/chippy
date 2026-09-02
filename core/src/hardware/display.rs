@@ -117,12 +117,13 @@ impl Display {
             .into_iter()
             .for_each(|plane| func(&mut self.planes[plane]))
     }
-    
+
     pub(crate) fn set_targeted_plane(&mut self, plane: TargetPlane) {
         self.targeted_plane = plane;
     }
-    pub fn draw_line(&mut self, row: usize, col: usize, mask: u16, plane: usize) -> bool {
-        let mask = (mask as u128) << col;
+
+    pub fn draw_line(&mut self, row: usize, col: usize, mask: u16, plane: usize, wrap: bool) -> bool {
+        let mask = if wrap {((mask as u128) << col) | (mask as u128 >> (self.width - col))} else { (mask as u128) << col };
         let mut collisions = 0;
         let buf_line = &mut self.planes[plane][row];
         collisions += ((*buf_line & mask) != 0) as u8;
@@ -130,15 +131,15 @@ impl Display {
         collisions > 0
     }
 
-    pub fn draw_sprite(&mut self, row: usize, col: usize, masks: &[u16], plane: usize) -> u8 {
+    pub fn draw_sprite(&mut self, row: usize, col: usize, masks: &[u16], plane: usize, wrap: bool) -> u8 {
         masks
             .iter()
             .enumerate()
             .fold(0u8, |collisions, (i, &mask)| {
-                let curr = row + i;
-                if curr >= self.height {
+                let curr_row = row + i;
+                if curr_row >= self.height && !wrap {
                     collisions
-                } else if self.draw_line(curr, col, mask, plane) {
+                } else if self.draw_line(curr_row % self.height, col, mask, plane, wrap) {
                     collisions + 1
                 } else {
                     collisions

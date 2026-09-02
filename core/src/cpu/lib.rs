@@ -59,7 +59,15 @@ impl Target {
                     | LoResWideSpriteOnDrwXY0
                     | DrawSpriteOnDrwXY0
             }
-            XOChip => Quirks::default() | IncrIOnLd | HasScrollOps,
+            XOChip => {
+                Quirks::default()
+                    | IncrIOnLd
+                    | HasScrollOps
+                    | ClScrOnResChange
+                    | DrawSpriteOnDrwXY0
+                    | LoResWideSpriteOnDrwXY0
+                    | WrapPixelsOnDraw
+            }
         }
     }
 }
@@ -82,7 +90,7 @@ pub enum TargetQuirk {
     ScrHalfOnLoRes = 1 << 9,
     DrawSpriteOnDrwXY0 = 1 << 10,
     LoResWideSpriteOnDrwXY0 = 1 << 11,
-    WrapPixels = 1 << 12,
+    WrapPixelsOnDraw = 1 << 12,
 }
 
 #[derive(Default)]
@@ -90,7 +98,6 @@ pub(crate) struct Quirks {
     pub(crate) quirk_map: u16,
 }
 
-pub(super) static RAM_SIZE: usize = 4096;
 pub(super) static STACK_SIZE: usize = 16;
 pub(super) static REG_COUNT: usize = 16;
 pub(super) static RPL_REG_COUNT: usize = 16;
@@ -160,7 +167,7 @@ impl Cpu {
     }
 
     pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
-        if rom.len() + 0x200 > RAM_SIZE {
+        if rom.len() + self.target.start_address() as usize > self.target.ram_size() {
             return Err("ROM too large");
         }
         self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
@@ -424,7 +431,13 @@ impl Cpu {
                         })
                         .collect();
 
-                    vf += self.display.draw_sprite(row, col, &chomps, plane);
+                    vf += self.display.draw_sprite(
+                        row,
+                        col,
+                        &chomps,
+                        plane,
+                        self.has_quirk(WrapPixelsOnDraw),
+                    );
                     addr += sprite_h * sprite_width; // only advances for planes actually consumed
                 }
 

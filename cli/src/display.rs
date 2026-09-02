@@ -1,17 +1,20 @@
-use crate::frontend::Frontend;
 use crate::Term;
+use crate::frontend::Frontend;
 use chippy_core::cpu::Cpu;
 use ratatui::layout::Constraint::{Fill, Length, Min};
 use ratatui::layout::Direction::Horizontal;
+use ratatui::layout::Flex;
 use ratatui::prelude::Constraint::Max;
 use ratatui::prelude::Direction::Vertical;
-use ratatui::widgets::{BorderType, Padding};
+use ratatui::symbols::Marker;
+use ratatui::widgets::canvas::{Canvas, Points};
+use ratatui::widgets::{BorderType, Padding, Paragraph};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders},
 };
+use std::collections::HashMap;
 use std::rc::Rc;
-use ratatui::layout::Flex;
 
 #[allow(unused)]
 fn is_pixel_on(line: u128, _row: usize, col: usize) -> bool {
@@ -33,11 +36,12 @@ impl Frontend {
             let area = frame.area();
             let inner = block.inner(area);
             let areas: Rects = {
-                let width_constraints = [Max(cpu.get_display().get_width() as u16 + 4), Min(if self.debug_mode { 12 } else { 0 })];
-                let height_constraints = [
-                    Max((cpu.get_display().get_height() as u16) / 2 + 4),
-                    Fill(1),
+                let width_constraints = [
+                    Max(cpu.get_display().width() as u16 + 4),
+                    Min(if self.debug_mode { 12 } else { 0 }),
                 ];
+                let height_constraints =
+                    [Max((cpu.get_display().height() as u16) / 2 + 4), Fill(1)];
                 let horizontal = Layout::default()
                     .constraints(width_constraints)
                     .direction(Horizontal)
@@ -61,11 +65,12 @@ impl Frontend {
                     special_reg_and_stack.width = 16;
                     (reg, special_reg_and_stack)
                 } else {
-                    let bottom_slice = Layout::horizontal([Max(20)])
+                    let bottom_slice = Layout::horizontal([Max(20)]).spacing(1).split(vertical[1]);
+                    let layout = Layout::horizontal([Max(18), Max(18)])
                         .spacing(1)
-                        .split(vertical[1]);
-                    let layout = Layout::horizontal([Max(18), Max(18)]).spacing(1).split(horizontal[1]);
-                    let (mut reg_area, mut special_reg_and_stack)  = (layout[0].clone(), layout[1].clone());
+                        .split(horizontal[1]);
+                    let (mut reg_area, mut special_reg_and_stack) =
+                        (layout[0].clone(), layout[1].clone());
                     reg_area.width = 18;
                     reg_area.height = vertical[0].height;
                     special_reg_and_stack.width = 18;
@@ -75,7 +80,7 @@ impl Frontend {
                 [screen_area, reg, special_reg_and_stack].into()
             };
             frame.render_widget(block, area);
-            self.render_chip_screen(frame, cpu, areas[0]).err();
+            self.render_chip_screen(frame, cpu, areas[0]);
             if self.debug_mode {
                 self.render_debug_window(frame, cpu, areas[1], areas[2])
             };
@@ -84,39 +89,45 @@ impl Frontend {
         Ok(())
     }
 
-    fn render_chip_screen(&self, frame: &mut Frame, cpu: &Cpu, area: Rect) -> std::io::Result<()> {
+    fn render_chip_screen(&self, frame: &mut Frame, cpu: &Cpu, area: Rect) {
         let (width, height, _capacity) = cpu.get_display().dimensions();
-        let screen = Block::default()
+        let planes = cpu.get_display().get_screen();
+
+        let screen_block = Block::default()
             .title("Screen")
             .border_type(BorderType::Rounded)
             .padding(Padding::uniform(1))
             .borders(Borders::ALL);
-        let inner = screen
-            .inner(area)
-            .centered(Length(area.width), Length(area.height));
-        let buf = frame.buffer_mut();
-        let rows = cpu.get_display().get_screen();
-        for cell_row in 0..height.div_ceil(2) {
-            let top_row = rows[cell_row * 2];
-            let bot_row = if cell_row * 2 + 1 < height {
-                rows[cell_row * 2 + 1]
+        let inner = screen_block.inner(area);
+        let buff = frame.buffer_mut();
+        (0..height.div_ceil(2)).for_each(|cell_row| {
+            let top_row = cell_row * 2;
+            let bot_row = top_row + 1;
+            let (p1_top, p2_top) = (planes.0[top_row], planes.1[top_row]);
+            let (p1_bot, p2_bot) = if bot_row < height {
+                (planes.0[bot_row], planes.1[bot_row])
             } else {
-                0
+                (0, 0)
             };
-            for col in 0..width {
-                if inner.x + col as u16 >= area.width || inner.y + cell_row as u16 >= area.height {
-                    continue;
-                }
-                let top_on = (top_row >> col) & 1 != 0;
-                let bottom_on = (bot_row >> col) & 1 != 0;
 
-                if let Some(cell) = buf.cell_mut((inner.x + col as u16, inner.y + cell_row as u16))
-                {
-                    cell.set_char(half_block_char(top_on, bottom_on));
+            (0..width).for_each(|col| {
+                let top = self.pixel_color((p1_top >> col) & 1 != 0, (p2_top >> col) & 1 != 0);
+                let bot = self.pixel_color((p1_bot >> col) & 1 != 0, (p2_bot >> col) & 1 != 0);
+                let cell =
+                    buff.cell_mut(Position::new(inner.x + col as u16, inner.y + cell_row as u16));
+                if let Some(cell) = cell {
+                    cell.set_char('▀').set_fg(top).set_bg(bot);
                 }
-            }
+            });
+        });
+        frame.render_widget(screen_block, area);
+    }
+    fn pixel_color(&self, plane1: bool, plane2: bool) -> Color {
+        match (plane1, plane2) {
+            (true, true) => self.overlap_color,
+            (true, false) => self.main_color,
+            (false, true) => self.sub_color,
+            _ => self.background_color,
         }
-        frame.render_widget(screen, area);
-        Ok(())
     }
 }
