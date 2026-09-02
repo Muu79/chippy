@@ -1,10 +1,10 @@
 use crate::frontend::Frontend;
-use chippy_core::cpu::Cpu;
-use ratatui::Frame;
+use chippy_core::hardware::cpu::Cpu;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Line, Stylize, Text};
 use ratatui::style::Color;
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Padding, Paragraph, Shadow};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Padding, Paragraph};
+use ratatui::Frame;
 
 const SIDE_BORDERS: Borders = Borders::LEFT.union(Borders::RIGHT);
 impl Frontend {

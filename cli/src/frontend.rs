@@ -1,8 +1,8 @@
 use chippy_core::hardware::Keyboard;
 use crossterm::event;
 use crossterm::event::Event;
-use std::time::Duration;
 use ratatui::style::Color;
+use std::time::Duration;
 
 /// Represents the frontend component of the system, which handles display and keyboard state.
 ///

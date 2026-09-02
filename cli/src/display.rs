@@ -1,19 +1,16 @@
-use crate::Term;
 use crate::frontend::Frontend;
-use chippy_core::cpu::Cpu;
+use crate::Term;
+use chippy_core::hardware::cpu::Cpu;
 use ratatui::layout::Constraint::{Fill, Length, Min};
 use ratatui::layout::Direction::Horizontal;
 use ratatui::layout::Flex;
 use ratatui::prelude::Constraint::Max;
 use ratatui::prelude::Direction::Vertical;
-use ratatui::symbols::Marker;
-use ratatui::widgets::canvas::{Canvas, Points};
-use ratatui::widgets::{BorderType, Padding, Paragraph};
+use ratatui::widgets::{BorderType, Padding};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders},
 };
-use std::collections::HashMap;
 use std::rc::Rc;
 
 #[allow(unused)]
@@ -65,7 +62,6 @@ impl Frontend {
                     special_reg_and_stack.width = 16;
                     (reg, special_reg_and_stack)
                 } else {
-                    let bottom_slice = Layout::horizontal([Max(20)]).spacing(1).split(vertical[1]);
                     let layout = Layout::horizontal([Max(18), Max(18)])
                         .spacing(1)
                         .split(horizontal[1]);

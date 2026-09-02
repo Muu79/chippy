@@ -1,6 +1,5 @@
-use crate::cpu::TargetQuirk::ScrHalfOnLoRes;
 use std::fmt::Write;
-use std::iter::{Iterator, repeat_n};
+use std::iter::{repeat_n, Iterator};
 
 /// A structure representing a graphical display with a fixed-size buffer.
 ///
@@ -123,7 +122,7 @@ impl Display {
     }
 
     pub fn draw_line(&mut self, row: usize, col: usize, mask: u16, plane: usize, wrap: bool) -> bool {
-        let mask = if wrap {((mask as u128) << col) | (mask as u128 >> (self.width - col))} else { (mask as u128) << col };
+        let mask = if wrap { ((mask as u128) << col) | (mask as u128 >> (self.width - col)) } else { (mask as u128) << col };
         let mut collisions = 0;
         let buf_line = &mut self.planes[plane][row];
         collisions += ((*buf_line & mask) != 0) as u8;

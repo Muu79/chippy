@@ -3,21 +3,22 @@ mod display;
 mod frontend;
 mod keyboard;
 
-use chippy_core::cpu::{Cpu, CpuCode, Target};
+use chippy_core::emu::targets::Target;
+use chippy_core::hardware::cpu::{Cpu, CpuCode};
 use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    supports_keyboard_enhancement,
+    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+    LeaveAlternateScreen,
 };
 use frontend::Frontend;
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use std::env;
 use std::error::Error;
-use std::io::{Stdout, stdout};
+use std::io::{stdout, Stdout};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -114,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend, instructions_per_frame: usize) -> Result<(), &'static str> {
-    for _ in 0..instructions_per_frame{
+    for _ in 0..instructions_per_frame {
         match cpu.tick_cpu()? {
             CpuCode::Wait => {
                 frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;

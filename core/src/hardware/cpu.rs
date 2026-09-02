@@ -1,104 +1,10 @@
+use crate::emu::encode_decode::Opcode::*;
+use crate::emu::encode_decode::{decode_instruction, Opcode};
+use crate::emu::targets::Target::Chip8;
+use crate::emu::targets::{Quirks, Target};
+use crate::hardware::{Direction, Display, Keyboard, Sprite, TargetPlane, CHAR_MAP};
 use crate::Rng;
-use crate::cpu::encode_decode::Opcode::LdILong;
-use crate::cpu::encode_decode::{Opcode, VRegister, decode_instruction};
-use crate::hardware::{CHAR_MAP, Direction, Display, Keyboard, Sprite, TargetPlane};
-use Target::*;
-use TargetQuirk::*;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Target for CPU to emulate
-#[derive(PartialEq, Copy, Clone)]
-pub enum Target {
-    Chip8,
-    SChip8Modern,
-    SChip8Legacy,
-    XOChip,
-}
-
-impl Target {
-    pub const fn start_address(&self) -> u16 {
-        match self {
-            Chip8 | SChip8Legacy | SChip8Modern | XOChip => 0x200,
-        }
-    }
-
-    pub const fn ram_size(&self) -> usize {
-        match self {
-            Chip8 | SChip8Legacy | SChip8Modern => 1 << 12,
-            XOChip => 1 << 16,
-        }
-    }
-
-    pub const fn default_instructions_per_frame(&self) -> usize {
-        match self {
-            Chip8 => 13,
-            SChip8Legacy => 15,
-            SChip8Modern | XOChip => 30,
-        }
-    }
-
-    pub(super) fn default_quirks(&self) -> Quirks {
-        match self {
-            Chip8 => Quirks::default() | IncrIOnLd | VfExtraReset | DispWait,
-            SChip8Legacy => {
-                Quirks::default()
-                    | ShiftUsesVx
-                    | JumpUsesVx
-                    | HasScrollOps
-                    | ClScrOnResChange
-                    | LargeSpriteOnFx29
-                    | DispWait
-                    | ScrHalfOnLoRes
-                    | DrawSpriteOnDrwXY0
-            }
-            SChip8Modern => {
-                Quirks::default()
-                    | ShiftUsesVx
-                    | JumpUsesVx
-                    | HasScrollOps
-                    | ClScrOnResChange
-                    | LoResWideSpriteOnDrwXY0
-                    | DrawSpriteOnDrwXY0
-            }
-            XOChip => {
-                Quirks::default()
-                    | IncrIOnLd
-                    | HasScrollOps
-                    | ClScrOnResChange
-                    | DrawSpriteOnDrwXY0
-                    | LoResWideSpriteOnDrwXY0
-                    | WrapPixelsOnDraw
-            }
-        }
-    }
-}
-
-#[repr(u16)]
-#[derive(Default, Clone, Copy)]
-pub enum TargetQuirk {
-    // Making None default means any quirk would cause it to return false for .has_quirk()
-    #[default]
-    NoQuirk = 0,
-    ShiftUsesVx = 1 << 0,
-    IncrIOnLd = 1 << 1,
-    VfExtraReset = 1 << 2,
-    DispWait = 1 << 3,
-    JumpUsesVx = 1 << 4,
-    HasScrollOps = 1 << 5,
-    ClScrOnResChange = 1 << 6,
-    LargeSpriteOnFx29 = 1 << 7,
-    DrwCountsCollisionLines = 1 << 8,
-    ScrHalfOnLoRes = 1 << 9,
-    DrawSpriteOnDrwXY0 = 1 << 10,
-    LoResWideSpriteOnDrwXY0 = 1 << 11,
-    WrapPixelsOnDraw = 1 << 12,
-}
-
-#[derive(Default)]
-pub(crate) struct Quirks {
-    pub(crate) quirk_map: u16,
-}
-
 pub(super) static STACK_SIZE: usize = 16;
 pub(super) static REG_COUNT: usize = 16;
 pub(super) static RPL_REG_COUNT: usize = 16;
@@ -124,7 +30,18 @@ pub struct Cpu {
     pub(super) audio_pattern: [u8; 16],
     pub(super) pitch: u16,
 }
-
+#[derive(Copy, Clone, PartialEq)]
+pub struct VRegister(pub(crate) usize);
+impl From<VRegister> for u8 {
+    fn from(value: VRegister) -> Self {
+        0xF & value.0 as u8
+    }
+}
+impl From<VRegister> for u16 {
+    fn from(value: VRegister) -> Self {
+        0xF & value.0 as u16
+    }
+}
 #[repr(u8)]
 pub enum CpuCode {
     Ok = 0,
@@ -167,125 +84,9 @@ impl Cpu {
         }
     }
 
-    pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
-        if rom.len() + self.target.start_address() as usize > self.target.ram_size() {
-            return Err("ROM too large");
-        }
-        self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
-        Ok(())
-    }
-
-    pub fn reset(&mut self) {
-        self.ram[self.target.start_address() as usize..].fill(0);
-        self.v_reg.fill(0);
-        self.i_reg = 0;
-        self.stack_ptr = 0;
-        self.stack.clear();
-        self.pc = self.target.start_address();
-        self.sound_timer = 0;
-        self.delay_timer = 0;
-        self.keys.reset();
-        self.display.clear();
-        self.audio_pattern = [0; 16];
-        self.pitch = 4000;
-    }
-
-    pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {
-        if new_target != self.target {
-            self.target = new_target;
-            std::mem::swap(self, &mut new_state);
-        }
-    }
-
-    pub fn eject_state(&mut self) -> Cpu {
-        let mut holder = Cpu::new(self.target);
-        std::mem::swap(self, &mut holder);
-        holder
-    }
-
-    pub fn swap_state(&mut self, other: &mut Cpu) {
-        std::mem::swap(self, other);
-    }
-
-    fn push(&mut self, val: u16) {
-        if self.stack_ptr == self.stack.len() as u16 {
-            self.stack.push(0);
-        }
-        self.stack[self.stack_ptr as usize] = val;
-        self.stack_ptr += 1;
-    }
-
-    fn pop(&mut self) -> Result<u16, &'static str> {
-        if self.stack_ptr == 0 {
-            return Err("Attempted to pop from empty stack");
-        }
-        self.stack_ptr -= 1;
-        Ok(self.stack[self.stack_ptr as usize])
-    }
-
-    pub fn tick_timers(&mut self) {
-        if self.delay_timer > 0 {
-            self.delay_timer -= 1;
-        }
-        if self.sound_timer > 0 {
-            self.sound_timer -= 1;
-        }
-    }
-
-    pub fn is_making_sound(&self) -> bool {
-        self.sound_timer > 0
-    }
-
-    pub fn is_waiting_for_key(&self) -> bool {
-        self.waiting_for_key.is_some()
-    }
-
-    pub fn is_extended(&self) -> bool {
-        self.display.is_extended()
-    }
-
-    pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
-        if let Some(reg) = self.waiting_for_key {
-            if let Some(first_input) = self.keys.as_input_key()
-                && !self.keys.is_pressed(first_input)?
-            {
-                *self.get_reg_mut(reg) = first_input;
-                self.waiting_for_key = None;
-            }
-            return Ok(CpuCode::Skipped);
-        }
-        let opcode = self.fetch()?;
-        let operation = if opcode == 0xF000 {
-            let idx = self.pc as usize;
-            let chomp = (self.ram[idx] as u16) << 8 | self.ram[idx + 1] as u16;
-            self.pc += 2;
-            LdILong(chomp)
-        } else {
-            decode_instruction(opcode)
-        };
-        self.execute(operation)
-    }
-
-    fn fetch(&mut self) -> Result<u16, &'static str> {
-        let addr = self.pc;
-        let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
-        self.pc += 2;
-        Ok(opcode)
-    }
-
-    fn skip_instruction(&mut self) {
-        let next_opcode =
-            (self.ram[self.pc as usize] as u16) << 8 | self.ram[self.pc as usize + 1] as u16;
-        // In XO-chip we need to account for 32bit wide opcode F000 aaaa
-        if next_opcode == 0xF000 && matches!(self.target, XOChip) {
-            self.pc += 4;
-        } else {
-            self.pc += 2;
-        }
-    }
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
-        use Opcode::*;
-        use TargetQuirk::*;
+        use crate::emu::encode_decode::Opcode::*;
+        use crate::emu::targets::Quirk::*;
         match operation {
             NoOp => (),
             ClS => self.display.clear(),
@@ -582,10 +383,128 @@ impl Cpu {
         Ok(CpuCode::Ok)
     }
 
+    pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
+        if rom.len() + self.target.start_address() as usize > self.target.ram_size() {
+            return Err("ROM too large");
+        }
+        self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.ram[self.target.start_address() as usize..].fill(0);
+        self.v_reg.fill(0);
+        self.i_reg = 0;
+        self.stack_ptr = 0;
+        self.stack.clear();
+        self.pc = self.target.start_address();
+        self.sound_timer = 0;
+        self.delay_timer = 0;
+        self.keys.reset();
+        self.display.clear();
+        self.audio_pattern = [0; 16];
+        self.pitch = 4000;
+    }
+
+    pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {
+        if new_target != self.target {
+            self.target = new_target;
+            std::mem::swap(self, &mut new_state);
+        }
+    }
+
+    pub fn eject_state(&mut self) -> Cpu {
+        let mut holder = Cpu::new(self.target);
+        std::mem::swap(self, &mut holder);
+        holder
+    }
+
+    pub fn swap_state(&mut self, other: &mut Cpu) {
+        std::mem::swap(self, other);
+    }
+
+    fn push(&mut self, val: u16) {
+        if self.stack_ptr == self.stack.len() as u16 {
+            self.stack.push(0);
+        }
+        self.stack[self.stack_ptr as usize] = val;
+        self.stack_ptr += 1;
+    }
+
+    fn pop(&mut self) -> Result<u16, &'static str> {
+        if self.stack_ptr == 0 {
+            return Err("Attempted to pop from empty stack");
+        }
+        self.stack_ptr -= 1;
+        Ok(self.stack[self.stack_ptr as usize])
+    }
+
+    pub fn tick_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+    }
+
+    pub fn is_making_sound(&self) -> bool {
+        self.sound_timer > 0
+    }
+
+    pub fn is_waiting_for_key(&self) -> bool {
+        self.waiting_for_key.is_some()
+    }
+
+    pub fn is_extended(&self) -> bool {
+        self.display.is_extended()
+    }
+
+    pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
+        if let Some(reg) = self.waiting_for_key {
+            if let Some(first_input) = self.keys.as_input_key()
+                && !self.keys.is_pressed(first_input)?
+            {
+                *self.get_reg_mut(reg) = first_input;
+                self.waiting_for_key = None;
+            }
+            return Ok(CpuCode::Skipped);
+        }
+        let opcode = self.fetch()?;
+        let operation = if opcode == 0xF000 {
+            let idx = self.pc as usize;
+            let chomp = (self.ram[idx] as u16) << 8 | self.ram[idx + 1] as u16;
+            self.pc += 2;
+            LdILong(chomp)
+        } else {
+            decode_instruction(opcode)
+        };
+        self.execute(operation)
+    }
+
+    fn fetch(&mut self) -> Result<u16, &'static str> {
+        let addr = self.pc;
+        let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
+        self.pc += 2;
+        Ok(opcode)
+    }
+
+    fn skip_instruction(&mut self) {
+        let next_opcode =
+            (self.ram[self.pc as usize] as u16) << 8 | self.ram[self.pc as usize + 1] as u16;
+        // In XO-chip we need to account for 32bit wide opcode F000 aaaa
+        if next_opcode == 0xF000 && matches!(self.target, Target::XOChip) {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+
     fn get_top_rpl_reg(&self, v_x: VRegister) -> usize {
-        if matches!(self.target, SChip8Legacy | SChip8Modern) {
+        if matches!(self.target, Target::SChip8Legacy | Target::SChip8Modern) {
             v_x.0 % 8
-        } else if matches!(self.target, XOChip) {
+        } else if matches!(self.target, Target::XOChip) {
             v_x.0 % 16
         } else {
             0
@@ -598,12 +517,4 @@ impl Cpu {
     fn set_vf(&mut self, num: u8) {
         self.v_reg[0xF] = num;
     }
-}
-
-pub fn parse_hex(hex: u32) -> [Sprite; 8] {
-    let mut ans = [Sprite::default(); 8];
-    for (i, sprite) in ans.iter_mut().enumerate() {
-        *sprite = Sprite::from_hex(((hex >> ((7 - i) * 4)) & 0xF) as u8, false).unwrap_or_default();
-    }
-    ans
 }

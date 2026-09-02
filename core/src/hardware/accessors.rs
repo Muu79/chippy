@@ -1,5 +1,5 @@
-use crate::cpu::encode_decode::VRegister;
-use crate::cpu::{Cpu, Target, TargetQuirk};
+use crate::emu::targets::{Quirk, Target};
+use crate::hardware::cpu::{Cpu, VRegister};
 use crate::hardware::{Display, Keyboard};
 
 impl Cpu {
@@ -9,13 +9,13 @@ impl Cpu {
     pub fn set_quirk_map(&mut self, quirk_map: u16) {
         self.target_quirks.quirk_map = quirk_map
     }
-    pub fn has_quirk(&self, quirk: TargetQuirk) -> bool {
+    pub fn has_quirk(&self, quirk: Quirk) -> bool {
         self.target_quirks.quirk_map & quirk as u16 != 0
     }
-    pub fn set_quirk(&mut self, quirk: TargetQuirk) {
+    pub fn set_quirk(&mut self, quirk: Quirk) {
         self.target_quirks.quirk_map |= quirk as u16
     }
-    pub fn clear_quirk(&mut self, quirk: TargetQuirk) {
+    pub fn clear_quirk(&mut self, quirk: Quirk) {
         self.target_quirks.quirk_map &= !(quirk as u16)
     }
     pub fn get_pc(&self) -> u16 {

@@ -1,5 +1,5 @@
 //! Chippy8 emulator
-pub mod cpu;
+pub mod emu;
 pub mod hardware;
 
 pub fn parse_hex(hex: char) -> Result<u16, &'static str> {

@@ -1,16 +1,6 @@
+use crate::hardware::cpu::VRegister;
 use Opcode::*;
-#[derive(Copy, Clone, PartialEq)]
-pub struct VRegister(pub(crate) usize);
-impl From<VRegister> for u8 {
-    fn from(value: VRegister) -> Self {
-        0xF & value.0 as u8
-    }
-}
-impl From<VRegister> for u16 {
-    fn from(value: VRegister) -> Self {
-        0xF & value.0 as u16
-    }
-}
+
 pub enum Opcode {
     NoOp,
     ClS,
@@ -63,7 +53,7 @@ pub enum Opcode {
     LdVxToVyI(VRegister, VRegister),
     SelectPlane(u8),
     StoreAudioBuffer,
-    SetPitch(VRegister)
+    SetPitch(VRegister),
 }
 
 pub const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {
