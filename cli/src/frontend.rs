@@ -35,10 +35,10 @@ impl Frontend {
         Frontend {
             keys: Keyboard::new(),
             debug_mode: false,
-            background_color: Color::Rgb(0xA1, 0x6C, 0x00),
-            main_color: Color::Rgb(0xFF, 0xAB, 0x00),
-            sub_color: Color::Black,
-            overlap_color: Color::Black,
+            background_color: Color::Black,
+            main_color: Color::Rgb(255, 125, 125),
+            sub_color: Color::Rgb(125, 255, 125),
+            overlap_color: Color::Rgb(255, 255, 125),
         }
     }
 

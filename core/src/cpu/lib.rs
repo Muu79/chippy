@@ -29,10 +29,11 @@ impl Target {
         }
     }
 
-    pub const fn is_extendable(&self) -> bool {
+    pub const fn default_instructions_per_frame(&self) -> usize {
         match self {
-            Chip8 => false,
-            SChip8Legacy | XOChip | SChip8Modern => true,
+            Chip8 => 13,
+            SChip8Legacy => 15,
+            SChip8Modern | XOChip => 30,
         }
     }
 

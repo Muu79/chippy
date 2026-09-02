@@ -99,9 +99,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut cpu = Cpu::new(target);
     let mut frontend = Frontend::new();
     cpu.load_rom(&rom)?;
+    let instructions_per_frame = cpu.get_target().default_instructions_per_frame();
     loop {
         let frame_start = Instant::now();
-        run_cpu_cycles(&mut cpu, &mut frontend)?;
+        run_cpu_cycles(&mut cpu, &mut frontend, instructions_per_frame)?;
         frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
         cpu.tick_timers();
         frontend.draw_screen(&mut terminal, &cpu)?;
@@ -112,8 +113,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend) -> Result<(), &'static str> {
-    for _ in 0..CYCLES_PER_FRAME {
+fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend, instructions_per_frame: usize) -> Result<(), &'static str> {
+    for _ in 0..instructions_per_frame{
         match cpu.tick_cpu()? {
             CpuCode::Wait => {
                 frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
