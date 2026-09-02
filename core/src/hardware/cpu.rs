@@ -379,6 +379,9 @@ impl Cpu {
             }),
             StoreAudioBuffer => {}
             SetPitch(_) => {}
+            LdLargeSpr(v_x) => {
+                self.i_reg = Sprite::from_hex(self.get_reg(v_x) & 0xF, true)? as u16;
+            }
         };
         Ok(CpuCode::Ok)
     }
@@ -499,7 +502,6 @@ impl Cpu {
             self.pc += 2;
         }
     }
-
 
     fn get_top_rpl_reg(&self, v_x: VRegister) -> usize {
         if matches!(self.target, Target::SChip8Legacy | Target::SChip8Modern) {

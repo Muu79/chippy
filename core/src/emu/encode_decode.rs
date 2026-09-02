@@ -54,6 +54,7 @@ pub enum Opcode {
     SelectPlane(u8),
     StoreAudioBuffer,
     SetPitch(VRegister),
+    LdLargeSpr(VRegister)
 }
 
 pub const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {
@@ -115,6 +116,7 @@ pub fn decode_instruction(encoded_instruction: u16) -> Opcode {
         (0xF, _, 0x1, 0x8) => LdVxST(x_reg),
         (0xF, _, 0x1, 0xE) => AddIVx(x_reg),
         (0xF, _, 0x2, 0x9) => LdSpr(x_reg),
+        (0xF, _, 0x3, 0x0) => LdLargeSpr(x_reg),
         (0xF, _, 0x3, 0x3) => LdDeci(x_reg),
         (0xF, _, 0x5, 0x5) => LdVxI(x_reg),
         (0xF, _, 0x6, 0x5) => LdIVx(x_reg),

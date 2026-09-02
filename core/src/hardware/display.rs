@@ -50,7 +50,7 @@ pub enum TargetPlane {
 }
 
 impl Display {
-    /// Create a new [`Display`] based on the supplied [`Target`]
+    /// Create a new [`Display`]
     pub fn new() -> Display {
         Display {
             plane_1: [0u128; 64],
