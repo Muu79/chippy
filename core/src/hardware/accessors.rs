@@ -68,6 +68,6 @@ impl Cpu {
     }
 
     pub fn get_audio_pattern(&self) -> &[u8] {
-        self.audio_pattern.as_slice()
+        &self.audio_pattern[..]
     }
 }

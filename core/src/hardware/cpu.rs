@@ -58,7 +58,7 @@ impl Default for Cpu {
 impl Cpu {
     pub fn new(target: Target) -> Self {
         let mut ram = vec![0; target.ram_size()].into_boxed_slice();
-        ram[..CHAR_MAP.len()].copy_from_slice(CHAR_MAP.as_slice()); // We always copy the full (small and large) char sprites, may be worth changing
+        ram[..CHAR_MAP.len()].copy_from_slice(&CHAR_MAP[..]); // We always copy the full (small and large) char sprites, may be worth changing
         Self {
             ram,
             v_reg: [0; REG_COUNT],
@@ -472,10 +472,11 @@ impl Cpu {
     pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
         if let Some(reg) = self.waiting_for_key {
             if let Some(first_input) = self.keys.as_input_key()
-                && !self.keys.is_pressed(first_input)?
             {
-                *self.get_reg_mut(reg) = first_input;
-                self.waiting_for_key = None;
+                if !self.keys.is_pressed(first_input)? {
+                    *self.get_reg_mut(reg) = first_input;
+                    self.waiting_for_key = None;
+                }
             }
             return Ok(CpuCode::Skipped);
         }

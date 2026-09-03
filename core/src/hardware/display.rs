@@ -69,7 +69,7 @@ impl Display {
         self.planes.iter_mut().for_each(|plane| plane.fill(0))
     }
     pub fn get_screen(&self) -> (&[u128], &[u128]) {
-        (self.planes[0].as_slice(), self.planes[1].as_slice())
+        (&self.planes[0][..], &self.planes[1][..])
     }
     pub fn get_screen_mut(&mut self) -> (&mut [u128], &mut [u128]) {
         let (left, right) = self.planes.split_at_mut(1);
