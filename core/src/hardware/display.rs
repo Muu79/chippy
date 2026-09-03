@@ -1,5 +1,4 @@
-use std::fmt::Write;
-use std::iter::{repeat_n, Iterator};
+use std::iter::Iterator;
 
 /// A structure representing a graphical display with a fixed-size buffer.
 ///
@@ -23,7 +22,6 @@ use std::iter::{repeat_n, Iterator};
 /// Access to the `height`, `width`, and `capacity` fields is restricted to the current crate, while
 /// the `buffer` remains private to encapsulate the display's graphical state.
 pub struct Display {
-    plane_1: [u128; 64],
     planes: [[u128; 64]; 2],
     targeted_plane: TargetPlane,
     pub(crate) width: usize,
@@ -49,11 +47,16 @@ pub enum TargetPlane {
     Both = 0b11,
 }
 
+impl Default for Display {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Display {
     /// Create a new [`Display`]
     pub fn new() -> Display {
         Display {
-            plane_1: [0u128; 64],
             planes: [[0u128; 64]; 2],
             targeted_plane: TargetPlane::Plane1,
             width: 64,
@@ -111,7 +114,7 @@ impl Display {
         }
     }
 
-    pub(crate) fn for_each_selected_plane<F: FnMut(&mut [u128]) -> ()>(&mut self, mut func: F) {
+    pub(crate) fn for_each_selected_plane<F: FnMut(&mut [u128])>(&mut self, mut func: F) {
         self.get_plane_idx()
             .into_iter()
             .for_each(|plane| func(&mut self.planes[plane]))
@@ -212,33 +215,6 @@ impl Display {
 
     fn scroll_right(&mut self, amount: usize) {
         self.for_each_selected_plane(|plane| plane.iter_mut().for_each(|row| *row <<= amount));
-    }
-}
-
-impl std::fmt::Display for Display {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_char('\u{250C}')?;
-        f.write_str(&repeat_n('\u{2500}', 64).collect::<String>())?;
-        f.write_char('\u{2510}')?;
-        f.write_char('\n')?;
-        for row in 0..self.height {
-            f.write_char('\u{2502}')?;
-            let line = self.plane_1[row];
-            f.write_str(&(0..self.width).fold(String::new(), |mut acc, offset| {
-                if (1 << offset) & line != 0 {
-                    acc.push('*')
-                } else {
-                    acc.push(' ')
-                };
-                acc
-            }))?;
-            f.write_char('\u{2502}')?;
-            f.write_char('\n')?;
-        }
-        f.write_char('\u{2514}')?;
-        f.write_str(&repeat_n('\u{2500}', 64).collect::<String>())?;
-        f.write_char('\u{2518}')?;
-        Ok(())
     }
 }
 
