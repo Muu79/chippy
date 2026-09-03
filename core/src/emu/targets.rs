@@ -89,6 +89,6 @@ pub enum Quirk {
 }
 
 #[derive(Default)]
-pub(crate) struct Quirks {
+pub struct Quirks {
     pub(crate) quirk_map: u16,
 }

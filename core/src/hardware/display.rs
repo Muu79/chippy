@@ -121,8 +121,19 @@ impl Display {
         self.targeted_plane = plane;
     }
 
-    pub fn draw_line(&mut self, row: usize, col: usize, mask: u16, plane: usize, wrap: bool) -> bool {
-        let mask = if wrap { ((mask as u128) << col) | (mask as u128 >> (self.width - col)) } else { (mask as u128) << col };
+    pub fn draw_line(
+        &mut self,
+        row: usize,
+        col: usize,
+        mask: u16,
+        plane: usize,
+        wrap: bool,
+    ) -> bool {
+        let mask = if wrap {
+            ((mask as u128) << col) | (mask as u128 >> (self.width - col))
+        } else {
+            (mask as u128) << col
+        };
         let mut collisions = 0;
         let buf_line = &mut self.planes[plane][row];
         collisions += ((*buf_line & mask) != 0) as u8;
@@ -130,7 +141,14 @@ impl Display {
         collisions > 0
     }
 
-    pub fn draw_sprite(&mut self, row: usize, col: usize, masks: &[u16], plane: usize, wrap: bool) -> u8 {
+    pub fn draw_sprite(
+        &mut self,
+        row: usize,
+        col: usize,
+        masks: &[u16],
+        plane: usize,
+        wrap: bool,
+    ) -> u8 {
         masks
             .iter()
             .enumerate()

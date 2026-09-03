@@ -8,6 +8,12 @@ pub struct AudioState {
     pitch: AtomicU8,
 }
 
+impl Default for AudioState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AudioState {
     pub fn new() -> Self {
         Self {
@@ -19,8 +25,14 @@ impl AudioState {
 
     pub fn update_state(&self, is_playing: bool, pattern: &[u8], pitch: u8) {
         self.is_playing.store(is_playing, Ordering::Relaxed);
-        self.pattern[0].store(u64::from_be_bytes(pattern[0..8].try_into().unwrap()), Ordering::Relaxed);
-        self.pattern[1].store(u64::from_be_bytes(pattern[8..16].try_into().unwrap()), Ordering::Relaxed);
+        self.pattern[0].store(
+            u64::from_be_bytes(pattern[0..8].try_into().unwrap()),
+            Ordering::Relaxed,
+        );
+        self.pattern[1].store(
+            u64::from_be_bytes(pattern[8..16].try_into().unwrap()),
+            Ordering::Relaxed,
+        );
         self.pitch.store(pitch, Ordering::Relaxed);
     }
 }
@@ -45,7 +57,10 @@ impl Chip8AudioSource {
     }
 
     pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-        Self { sample_rate, ..self }
+        Self {
+            sample_rate,
+            ..self
+        }
     }
 
     pub fn with_state(self, state: Arc<AudioState>) -> Self {
@@ -53,9 +68,11 @@ impl Chip8AudioSource {
     }
 
     pub fn with_xo_chip_audio(self, xo_chip_audio: bool) -> Self {
-        Self { xo_chip: xo_chip_audio, ..self }
+        Self {
+            xo_chip: xo_chip_audio,
+            ..self
+        }
     }
-
 }
 
 const BEEP_HZ: f64 = 440.0;
@@ -81,8 +98,16 @@ impl Iterator for Chip8AudioSource {
 }
 
 impl rodio::Source for Chip8AudioSource {
-    fn current_span_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> NonZeroU16 { NonZeroU16::new(1u16).unwrap() }
-    fn sample_rate(&self) -> NonZeroU32 { NonZeroU32::new(self.sample_rate).unwrap() }
-    fn total_duration(&self) -> Option<std::time::Duration> { None }
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> NonZeroU16 {
+        NonZeroU16::new(1u16).unwrap()
+    }
+    fn sample_rate(&self) -> NonZeroU32 {
+        NonZeroU32::new(self.sample_rate).unwrap()
+    }
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        None
+    }
 }

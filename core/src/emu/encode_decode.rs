@@ -54,7 +54,7 @@ pub enum Opcode {
     SelectPlane(u8),
     StoreAudioBuffer,
     SetPitch(VRegister),
-    LdLargeSpr(VRegister)
+    LdLargeSpr(VRegister),
 }
 
 pub const fn nibble_op_code(opcode: u16) -> (u8, u8, u8, u8) {

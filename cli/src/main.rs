@@ -1,30 +1,33 @@
+pub mod audio;
 mod debug_panel;
 mod display;
 mod frontend;
 mod keyboard;
-pub mod audio;
 
-use chippy_core::emu::targets::Target;
-use chippy_core::hardware::cpu::{Cpu, CpuCode};
-use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+use crate::audio::{AudioState, Chip8AudioSource};
+use chippy_core::{
+    emu::targets::Target,
+    hardware::cpu::{Cpu, CpuCode},
 };
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
-    LeaveAlternateScreen,
+use crossterm::{
+    event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    execute,
+    terminal::{
+        disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use frontend::Frontend;
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-use std::env;
-use std::error::Error;
-use std::io::{stdout, Stdout};
-use std::sync::Arc;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
-use rodio::{MixerDeviceSink, Player};
-use crate::audio::{AudioState, Chip8AudioSource};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
+use std::{
+    env,
+    error::Error,
+    io::{stdout, Stdout},
+    sync::Arc,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 struct TerminalGuard {
@@ -113,7 +116,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         run_cpu_cycles(&mut cpu, &mut frontend, instructions_per_frame)?;
         cpu.tick_timers();
         frontend.draw_screen(&mut terminal, &cpu)?;
-        audio_state.update_state(cpu.is_making_sound(), cpu.get_audio_pattern(), cpu.get_pitch());
+        audio_state.update_state(
+            cpu.is_making_sound(),
+            cpu.get_audio_pattern(),
+            cpu.get_pitch(),
+        );
         let end_time = Instant::now();
         if next_tick > end_time {
             sleep(next_tick - end_time);
@@ -124,20 +131,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn init_audio(is_xo_chip: bool) -> (Arc<AudioState>, Player, MixerDeviceSink) {
     let state = Arc::new(AudioState::new());
     let audio_source = Chip8AudioSource::new(is_xo_chip, state.clone());
-    let audio_handle = rodio::DeviceSinkBuilder::open_default_sink().expect("open default audio stream");
-    let player = rodio::Player::connect_new(audio_handle.mixer());
+    let audio_handle = DeviceSinkBuilder::open_default_sink().expect("open default audio stream");
+    let player = Player::connect_new(audio_handle.mixer());
     audio_handle.mixer().add(audio_source);
     (state, player, audio_handle)
 }
 
-fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend, instructions_per_frame: usize) -> Result<(), &'static str> {
+fn run_cpu_cycles(
+    cpu: &mut Cpu,
+    frontend: &mut Frontend,
+    instructions_per_frame: usize,
+) -> Result<(), &'static str> {
     for _ in 0..instructions_per_frame {
         match cpu.tick_cpu()? {
             CpuCode::KeyWait => {
                 frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
                 frontend.keys.reset_input_key();
                 break;
-            },
+            }
             CpuCode::DispWait => break,
             _ => continue,
         }

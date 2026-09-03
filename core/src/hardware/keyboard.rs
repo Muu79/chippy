@@ -42,8 +42,7 @@ impl Keyboard {
     pub fn is_pressed(&self, key: u8) -> Result<bool, &'static str> {
         if key > 15 {
             return Err(INVALID_KEY_ERROR);
-        }
-        ;
+        };
         Ok((self.map & (1 << key)) != 0)
     }
 

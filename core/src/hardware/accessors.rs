@@ -43,7 +43,7 @@ impl Cpu {
         &self.display
     }
     pub fn get_rand_byte(&mut self) -> u8 {
-        self.rng.next()
+        self.rng.next_rand()
     }
     pub fn get_keys_mut(&mut self) -> &mut Keyboard {
         &mut self.keys
@@ -66,7 +66,7 @@ impl Cpu {
     pub fn get_pitch(&self) -> u8 {
         self.pitch
     }
-    
+
     pub fn get_audio_pattern(&self) -> &[u8] {
         self.audio_pattern.as_slice()
     }

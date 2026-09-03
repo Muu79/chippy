@@ -17,14 +17,6 @@ use std::rc::Rc;
 fn is_pixel_on(line: u128, _row: usize, col: usize) -> bool {
     line & (1 << col) != 0
 }
-fn half_block_char(top: bool, bottom: bool) -> char {
-    match (top, bottom) {
-        (true, true) => '█',
-        (true, false) => '▀',
-        (false, true) => '▄',
-        (false, false) => ' ',
-    }
-}
 impl Frontend {
     pub fn draw_screen(&self, terminal: &mut Term, cpu: &Cpu) -> std::io::Result<()> {
         type Rects = Rc<[Rect]>;
@@ -56,17 +48,16 @@ impl Frontend {
                         .spacing(1)
                         .flex(Flex::Start)
                         .split(horizontal[1]);
-                    let mut reg = right_panel[0].clone();
+                    let mut reg = right_panel[0];
                     reg.width = 16;
-                    let mut special_reg_and_stack = right_panel[1].clone();
+                    let mut special_reg_and_stack = right_panel[1];
                     special_reg_and_stack.width = 16;
                     (reg, special_reg_and_stack)
                 } else {
                     let layout = Layout::horizontal([Max(18), Max(18)])
                         .spacing(1)
                         .split(horizontal[1]);
-                    let (mut reg_area, mut special_reg_and_stack) =
-                        (layout[0].clone(), layout[1].clone());
+                    let (mut reg_area, mut special_reg_and_stack) = (layout[0], layout[1]);
                     reg_area.width = 18;
                     reg_area.height = vertical[0].height;
                     special_reg_and_stack.width = 18;
@@ -109,8 +100,10 @@ impl Frontend {
             (0..width).for_each(|col| {
                 let top = self.pixel_color((p1_top >> col) & 1 != 0, (p2_top >> col) & 1 != 0);
                 let bot = self.pixel_color((p1_bot >> col) & 1 != 0, (p2_bot >> col) & 1 != 0);
-                let cell =
-                    buff.cell_mut(Position::new(inner.x + col as u16, inner.y + cell_row as u16));
+                let cell = buff.cell_mut(Position::new(
+                    inner.x + col as u16,
+                    inner.y + cell_row as u16,
+                ));
                 if let Some(cell) = cell {
                     cell.set_char('▀').set_fg(top).set_bg(bot);
                 }

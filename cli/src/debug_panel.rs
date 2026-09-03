@@ -6,7 +6,6 @@ use ratatui::style::Color;
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Padding, Paragraph};
 use ratatui::Frame;
 
-const SIDE_BORDERS: Borders = Borders::LEFT.union(Borders::RIGHT);
 impl Frontend {
     pub(crate) fn render_debug_window(
         &self,
@@ -23,7 +22,10 @@ impl Frontend {
         let v = cpu.get_v_regs();
         let mut buff = Text::default();
         for (i, &val) in v.iter().enumerate() {
-            let (idx, val) = (format!("{:01X}", i).fg(Color::Yellow), format!("{:#04X}", val).fg(Color::Cyan).bg(Color::White));
+            let (idx, val) = (
+                format!("{:01X}", i).fg(Color::Yellow),
+                format!("{:#04X}", val).fg(Color::Cyan).bg(Color::White),
+            );
             buff.lines
                 .push(Line::from(format!("V{}: {}", idx, val)).blue());
         }
@@ -44,7 +46,11 @@ impl Frontend {
         let mut lines = vec![
             format!("PC: {:#06X}", cpu.get_pc()),
             format!("I:  {:#06X}", cpu.get_i_reg()),
-            format!("DT: {:>#03X} ({}s)", cpu.get_delay_timer(), cpu.get_delay_timer() / 60),
+            format!(
+                "DT: {:>#03X} ({}s)",
+                cpu.get_delay_timer(),
+                cpu.get_delay_timer() / 60
+            ),
             format!(
                 "ST: {:>#03X} ({}s){}",
                 cpu.get_sound_timer(),
