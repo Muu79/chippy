@@ -28,7 +28,7 @@ pub struct Cpu {
     pub(super) rpl_regs: [u8; RPL_REG_COUNT],
     // XO-Chip props
     pub(super) audio_pattern: [u8; 16],
-    pub(super) pitch: u16,
+    pub(super) pitch: u8,
 }
 #[derive(Copy, Clone, PartialEq)]
 pub struct VRegister(pub(crate) usize);
@@ -45,9 +45,10 @@ impl From<VRegister> for u16 {
 #[repr(u8)]
 pub enum CpuCode {
     Ok = 0,
-    Wait = 1,
-    Skipped = 2,
-    Exit(&'static str) = 3,
+    KeyWait = 1,
+    DispWait = 2,
+    Skipped = 3,
+    Exit(&'static str) = 4,
 }
 impl Default for Cpu {
     fn default() -> Self {
@@ -80,7 +81,7 @@ impl Cpu {
                     .as_secs(),
             ),
             audio_pattern: [0; 16],
-            pitch: 4000,
+            pitch: 64,
         }
     }
 
@@ -99,12 +100,12 @@ impl Cpu {
                 self.pc = nnn;
             }
             SEByte(v_x, kk) => {
-                if self.get_reg(v_x) == &kk {
+                if self.get_reg(v_x) == kk {
                     self.skip_instruction()
                 }
             }
             SNEByte(v_x, kk) => {
-                if self.get_reg(v_x) != &kk {
+                if self.get_reg(v_x) != kk {
                     self.skip_instruction()
                 }
             }
@@ -125,62 +126,62 @@ impl Cpu {
                 *self.get_reg_mut(v_x) = self.get_reg(v_x).wrapping_add(kk);
             }
             LdReg(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = y;
             }
             Or(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) |= y;
                 if self.has_quirk(VfExtraReset) {
                     self.vf_flag(false);
                 }
             }
             And(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) &= y;
                 if self.has_quirk(VfExtraReset) {
                     self.vf_flag(false);
                 }
             }
             Xor(v_x, v_y) => {
-                let y = *self.get_reg(v_y);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) ^= y;
                 if self.has_quirk(VfExtraReset) {
                     self.vf_flag(false);
                 }
             }
             AddVxVy(v_x, v_y) => {
-                let x = *self.get_reg(v_x);
-                let y = *self.get_reg(v_y);
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = x.wrapping_add(y);
                 self.vf_flag((x as u16 + y as u16) > 0xff);
             }
             Sub(v_x, v_y) => {
-                let x = *self.get_reg(v_x);
-                let y = *self.get_reg(v_y);
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = x.wrapping_sub(y);
                 self.vf_flag(x >= y);
             }
             ShR(v_x, v_y) => {
                 let source = if self.has_quirk(ShiftUsesVx) {
-                    *self.get_reg(v_x)
+                    self.get_reg(v_x)
                 } else {
-                    *self.get_reg(v_y)
+                    self.get_reg(v_y)
                 };
                 *self.get_reg_mut(v_x) = source >> 1;
                 self.vf_flag(source & 0x1 == 0x1);
             }
             SubN(v_x, v_y) => {
-                let x = *self.get_reg(v_x);
-                let y = *self.get_reg(v_y);
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
                 *self.get_reg_mut(v_x) = y.wrapping_sub(x);
                 self.vf_flag(y >= x);
             }
             ShL(v_x, v_y) => {
                 let source = if self.has_quirk(ShiftUsesVx) {
-                    *self.get_reg(v_x)
+                    self.get_reg(v_x)
                 } else {
-                    *self.get_reg(v_y)
+                    self.get_reg(v_y)
                 };
                 *self.get_reg_mut(v_x) = source << 1;
                 self.vf_flag(source & 0x80 == 0x80);
@@ -191,9 +192,9 @@ impl Cpu {
             JpReg(nnn) => {
                 let target = if self.has_quirk(JumpUsesVx) {
                     let v_x = VRegister((nnn >> 8) as usize);
-                    nnn.wrapping_add(*self.get_reg(v_x) as u16)
+                    nnn.wrapping_add(self.get_reg(v_x) as u16)
                 } else {
-                    nnn.wrapping_add(*self.get_reg(VRegister(0)) as u16)
+                    nnn.wrapping_add(self.get_reg(VRegister(0)) as u16)
                 };
                 self.pc = target;
             }
@@ -203,8 +204,8 @@ impl Cpu {
             Drw(v_x, v_y, n) => {
                 let (width, height) = self.display_dimensions();
                 let (col, row) = (
-                    *self.get_reg(v_x) as usize % width,
-                    *self.get_reg(v_y) as usize % height,
+                    self.get_reg(v_x) as usize % width,
+                    self.get_reg(v_y) as usize % height,
                 );
 
                 let draws_16x16 = n == 0 && self.has_quirk(DrawSpriteOnDrwXY0);
@@ -250,31 +251,31 @@ impl Cpu {
                 });
 
                 if self.has_quirk(DispWait) && !self.is_extended() {
-                    return Ok(CpuCode::Wait);
+                    return Ok(CpuCode::DispWait);
                 }
             }
             SkP(v_x) => {
-                if self.keys.is_pressed(*self.get_reg(v_x))? {
+                if self.keys.is_pressed(self.get_reg(v_x))? {
                     self.skip_instruction()
                 }
             }
             SkNP(v_x) => {
-                if !self.keys.is_pressed(*self.get_reg(v_x))? {
+                if !self.keys.is_pressed(self.get_reg(v_x))? {
                     self.skip_instruction()
                 }
             }
             LdDTVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
             LdKey(v_x) => {
                 self.waiting_for_key = Some(v_x);
-                return Ok(CpuCode::Wait);
+                return Ok(CpuCode::KeyWait);
             }
-            LdVxDT(v_x) => self.delay_timer = *self.get_reg(v_x),
-            LdVxST(v_x) => self.sound_timer = *self.get_reg(v_x), // IIRC wrapping add on I is not possible
+            LdVxDT(v_x) => self.delay_timer = self.get_reg(v_x),
+            LdVxST(v_x) => self.sound_timer = self.get_reg(v_x), // IIRC wrapping add on I is not possible
             AddIVx(v_x) => {
-                self.i_reg += *self.get_reg(v_x) as u16;
+                self.i_reg += self.get_reg(v_x) as u16;
             }
             LdSpr(v_x) => {
-                let idx = *self.get_reg(v_x);
+                let idx = self.get_reg(v_x);
                 // SChip 1.0 Quirk
                 self.i_reg = if idx > 0xF && self.has_quirk(LargeSpriteOnFx29) {
                     Sprite::from_hex(idx % 0x10, true)? as u16
@@ -283,7 +284,7 @@ impl Cpu {
                 }
             }
             LdDeci(v_x) => {
-                let val = *self.get_reg(v_x) as u16;
+                let val = self.get_reg(v_x) as u16;
                 for pow in (0..3).rev() {
                     self.ram[(self.i_reg + (2 - pow)) as usize] =
                         ((val / 10u16.pow(pow as u32)) % 10) as u8;
@@ -291,7 +292,7 @@ impl Cpu {
             }
             LdVxI(v_x) => {
                 for i in 0..=v_x.0 {
-                    self.ram[self.i_reg as usize + i] = *self.get_reg(VRegister(i));
+                    self.ram[self.i_reg as usize + i] = self.get_reg(VRegister(i));
                 }
                 if self.has_quirk(IncrIOnLd) {
                     self.i_reg += v_x.0 as u16 + 1;
@@ -339,7 +340,7 @@ impl Cpu {
             SaveFlags(v_x) => {
                 let top_reg = self.get_top_rpl_reg(v_x);
                 for x in 0..=top_reg {
-                    self.rpl_regs[x] = *self.get_reg(VRegister(x));
+                    self.rpl_regs[x] = self.get_reg(VRegister(x));
                 }
             }
             LdFlags(v_x) => {
@@ -362,7 +363,7 @@ impl Cpu {
             LdIVxToVy(v_x, v_y) => {
                 let start = self.i_reg as usize;
                 for (idx, reg) in (v_x.0..=v_y.0).enumerate() {
-                    self.ram[start + idx] = *self.get_reg(VRegister(reg));
+                    self.ram[start + idx] = self.get_reg(VRegister(reg));
                 }
             }
             LdVxToVyI(v_x, v_y) => {
@@ -377,8 +378,13 @@ impl Cpu {
                 0b10 => TargetPlane::Plane2,
                 _ => TargetPlane::None,
             }),
-            StoreAudioBuffer => {}
-            SetPitch(_) => {}
+            StoreAudioBuffer => {
+                let start = self.i_reg as usize;
+                self.audio_pattern[..].copy_from_slice(&self.ram[start..start + 16]);
+            }
+            SetPitch(v_x) => {
+                self.pitch = self.get_reg(v_x);
+            }
             LdLargeSpr(v_x) => {
                 self.i_reg = Sprite::from_hex(self.get_reg(v_x) & 0xF, true)? as u16;
             }
@@ -406,7 +412,7 @@ impl Cpu {
         self.keys.reset();
         self.display.clear();
         self.audio_pattern = [0; 16];
-        self.pitch = 4000;
+        self.pitch = 64;
     }
 
     pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {

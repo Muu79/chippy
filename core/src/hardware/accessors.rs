@@ -51,8 +51,8 @@ impl Cpu {
     pub fn set_keyboard(&mut self, keys: Keyboard) {
         self.keys = keys;
     }
-    pub fn get_reg(&self, reg: VRegister) -> &u8 {
-        &self.v_reg[reg.0]
+    pub fn get_reg(&self, reg: VRegister) -> u8 {
+        self.v_reg[reg.0]
     }
 
     pub(super) fn get_reg_mut(&mut self, reg: VRegister) -> &mut u8 {
@@ -61,5 +61,13 @@ impl Cpu {
 
     pub fn display_dimensions(&self) -> (usize, usize) {
         (self.display.width, self.display.height)
+    }
+
+    pub fn get_pitch(&self) -> u8 {
+        self.pitch
+    }
+    
+    pub fn get_audio_pattern(&self) -> &[u8] {
+        self.audio_pattern.as_slice()
     }
 }
