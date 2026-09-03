@@ -1,4 +1,6 @@
-use std::iter::Iterator;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::iter::Iterator;
 
 /// A structure representing a graphical display with a fixed-size buffer.
 ///

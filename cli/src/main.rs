@@ -28,6 +28,7 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
+use std::time::SystemTime;
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 struct TerminalGuard {
@@ -103,7 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let rom = std::fs::read(rom_path)?;
-    let mut cpu = Cpu::new(target);
+    let mut cpu = Cpu::new(target, Some(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs()));
     cpu.load_rom(&rom)?;
 
     let mut frontend = Frontend::new();

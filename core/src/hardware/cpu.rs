@@ -1,10 +1,12 @@
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 use crate::emu::encode_decode::Opcode::*;
 use crate::emu::encode_decode::{decode_instruction, Opcode};
 use crate::emu::targets::Target::Chip8;
 use crate::emu::targets::{Quirks, Target};
 use crate::hardware::{Direction, Display, Keyboard, Sprite, TargetPlane, CHAR_MAP};
 use crate::Rng;
-use std::time::{SystemTime, UNIX_EPOCH};
 pub(super) static STACK_SIZE: usize = 16;
 pub(super) static REG_COUNT: usize = 16;
 pub(super) static RPL_REG_COUNT: usize = 16;
@@ -52,11 +54,11 @@ pub enum CpuCode {
 }
 impl Default for Cpu {
     fn default() -> Self {
-        Self::new(Chip8)
+        Self::new(Chip8, None)
     }
 }
 impl Cpu {
-    pub fn new(target: Target) -> Self {
+    pub fn new(target: Target, rng_seed: Option<u64>) -> Self {
         let mut ram = vec![0; target.ram_size()].into_boxed_slice();
         ram[..CHAR_MAP.len()].copy_from_slice(&CHAR_MAP[..]); // We always copy the full (small and large) char sprites, may be worth changing
         Self {
@@ -74,12 +76,7 @@ impl Cpu {
             target,
             target_quirks: target.default_quirks(),
             rpl_regs: [0; RPL_REG_COUNT],
-            rng: Rng::new(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            ),
+            rng: Rng::new(rng_seed.unwrap_or(123 << 5)),
             audio_pattern: [0; 16],
             pitch: 64,
         }
@@ -418,18 +415,18 @@ impl Cpu {
     pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {
         if new_target != self.target {
             self.target = new_target;
-            std::mem::swap(self, &mut new_state);
+            core::mem::swap(self, &mut new_state);
         }
     }
 
     pub fn eject_state(&mut self) -> Cpu {
-        let mut holder = Cpu::new(self.target);
-        std::mem::swap(self, &mut holder);
+        let mut holder = Cpu::new(self.target, None);
+        core::mem::swap(self, &mut holder);
         holder
     }
 
     pub fn swap_state(&mut self, other: &mut Cpu) {
-        std::mem::swap(self, other);
+        core::mem::swap(self, other);
     }
 
     fn push(&mut self, val: u16) {

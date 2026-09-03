@@ -1,5 +1,5 @@
+use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 use crate::emu::targets::{Quirk, Quirks};
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 impl From<u16> for Quirks {
     fn from(quirk_map: u16) -> Self {

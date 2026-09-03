@@ -1,5 +1,5 @@
-use std::fmt::Formatter;
-use std::ops::{BitOrAssign, BitXorAssign};
+use core::fmt::Formatter;
+use core::ops::{BitOrAssign, BitXorAssign};
 
 #[derive(Clone, Copy, Default)]
 pub struct Keyboard {
@@ -55,8 +55,8 @@ impl Keyboard {
     }
 }
 
-impl std::fmt::Display for Keyboard {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Keyboard {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         for i in 0..16 {
             write!(
                 f,
