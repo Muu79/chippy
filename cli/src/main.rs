@@ -2,6 +2,7 @@ mod debug_panel;
 mod display;
 mod frontend;
 mod keyboard;
+pub mod audio;
 
 use chippy_core::emu::targets::Target;
 use chippy_core::hardware::cpu::{Cpu, CpuCode};
@@ -19,8 +20,11 @@ use ratatui::Terminal;
 use std::env;
 use std::error::Error;
 use std::io::{stdout, Stdout};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+use rodio::{MixerDeviceSink, Player};
+use crate::audio::{AudioState, Chip8AudioSource};
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 struct TerminalGuard {
@@ -72,9 +76,7 @@ fn install_panic_hook() {
     }));
 }
 
-const CPU_HZ: u16 = 700;
 const DISPLAY_HZ: u16 = 60;
-const CYCLES_PER_FRAME: u16 = CPU_HZ / DISPLAY_HZ;
 const FRAME_TIME: Duration = Duration::from_micros((1_000_000) / DISPLAY_HZ as u64);
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -96,32 +98,47 @@ fn main() -> Result<(), Box<dyn Error>> {
             Target::Chip8
         }
     };
+
     let rom = std::fs::read(rom_path)?;
     let mut cpu = Cpu::new(target);
-    let mut frontend = Frontend::new();
     cpu.load_rom(&rom)?;
+
+    let mut frontend = Frontend::new();
+    let (audio_state, _audio_player, _audio_handle) = init_audio(target == Target::XOChip);
     let instructions_per_frame = cpu.get_target().default_instructions_per_frame();
+    let mut next_tick = Instant::now();
     loop {
-        let frame_start = Instant::now();
-        run_cpu_cycles(&mut cpu, &mut frontend, instructions_per_frame)?;
+        next_tick += FRAME_TIME;
         frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
+        run_cpu_cycles(&mut cpu, &mut frontend, instructions_per_frame)?;
         cpu.tick_timers();
         frontend.draw_screen(&mut terminal, &cpu)?;
-        let elapsed = frame_start.elapsed();
-        if elapsed < FRAME_TIME {
-            sleep(FRAME_TIME - elapsed);
+        audio_state.update_state(cpu.is_making_sound(), cpu.get_audio_pattern(), cpu.get_pitch());
+        let end_time = Instant::now();
+        if next_tick > end_time {
+            sleep(next_tick - end_time);
         }
     }
+}
+
+fn init_audio(is_xo_chip: bool) -> (Arc<AudioState>, Player, MixerDeviceSink) {
+    let state = Arc::new(AudioState::new());
+    let audio_source = Chip8AudioSource::new(is_xo_chip, state.clone());
+    let audio_handle = rodio::DeviceSinkBuilder::open_default_sink().expect("open default audio stream");
+    let player = rodio::Player::connect_new(audio_handle.mixer());
+    audio_handle.mixer().add(audio_source);
+    (state, player, audio_handle)
 }
 
 fn run_cpu_cycles(cpu: &mut Cpu, frontend: &mut Frontend, instructions_per_frame: usize) -> Result<(), &'static str> {
     for _ in 0..instructions_per_frame {
         match cpu.tick_cpu()? {
-            CpuCode::Wait => {
+            CpuCode::KeyWait => {
                 frontend.update_keys(frontend.poll_events(), cpu.get_keys_mut())?;
                 frontend.keys.reset_input_key();
                 break;
-            }
+            },
+            CpuCode::DispWait => break,
             _ => continue,
         }
     }
