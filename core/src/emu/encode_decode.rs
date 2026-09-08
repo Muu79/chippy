@@ -1,5 +1,5 @@
-use crate::hardware::cpu::VRegister;
 use Opcode::*;
+use crate::cpu::VRegister;
 
 /// Opcodes corresponding to chip-8 instructions. `[[Cpu]]` fetches and then decodes these
 pub enum Opcode {

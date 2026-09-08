@@ -6,7 +6,7 @@ mod keyboard;
 
 use crate::audio::{AudioState, Chip8AudioSource};
 use chippy8::config::target::Target;
-use chippy8::hardware::cpu::{Cpu, CpuCode};
+use chippy8::cpu::{Cpu, CpuCode};
 use crossterm::{
     event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
     execute,

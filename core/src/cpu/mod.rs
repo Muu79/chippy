@@ -2,3 +2,542 @@ mod execute;
 pub mod registers;
 pub mod state;
 pub mod inspect;
+pub mod mutate;
+
+use crate::config::quirks::Quirks;
+use crate::config::target::Target;
+use crate::config::target::Target::Chip8;
+use crate::display::font::{Sprite, CHAR_MAP};
+use crate::display::{Direction, Display, TargetPlane};
+use crate::emu::encode_decode::Opcode::*;
+use crate::emu::encode_decode::{decode_instruction, Opcode};
+use crate::hardware::Keyboard;
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use crate::rng::Rng;
+
+pub(super) static STACK_SIZE: usize = 16;
+pub(super) static REG_COUNT: usize = 16;
+pub(super) static RPL_REG_COUNT: usize = 16;
+
+/// The CPU makes up the heart of the emulator. It is responsible for the flow of instructions,
+/// as well as owning and managing the keyboard and display buffer
+pub struct Cpu {
+    ram: Box<[u8]>,
+    v_reg: [u8; REG_COUNT],
+    i_reg: u16,
+    stack: Vec<u16>,
+    stack_ptr: u16,
+    pc: u16,
+    sound_timer: u8,
+    delay_timer: u8,
+    keys: Keyboard,
+    display: Display,
+    waiting_for_key: Option<VRegister>,
+    target: Target,
+    target_quirks: Quirks,
+    rng: Rng,
+    // Super-Chip props
+    rpl_regs: [u8; RPL_REG_COUNT],
+    // XO-Chip props
+    audio_pattern: [u8; 16],
+    pitch: u8,
+}
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) struct VRegister(pub(crate) usize);
+impl From<VRegister> for u8 {
+    fn from(value: VRegister) -> Self {
+        0xF & value.0 as u8
+    }
+}
+impl From<VRegister> for u16 {
+    fn from(value: VRegister) -> Self {
+        0xF & value.0 as u16
+    }
+}
+
+pub enum CpuError {
+    InvalidOpcode(u8),
+    InvalidRegister(u8),
+    InvalidAddress(u16),
+}
+#[repr(u8)]
+pub enum CpuCode {
+    Ok = 0,
+    KeyWait = 1,
+    DispWait = 2,
+    Skipped = 3,
+    Exit(&'static str) = 4,
+}
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new(Chip8, None)
+    }
+}
+impl Cpu {
+    pub fn new(target: Target, rng_seed: Option<u64>) -> Self {
+        let mut ram = vec![0; target.ram_size()].into_boxed_slice();
+        ram[..CHAR_MAP.len()].copy_from_slice(&CHAR_MAP[..]); // We always copy the full (small and large) char sprites, may be worth changing
+        Self {
+            ram,
+            v_reg: [0; REG_COUNT],
+            i_reg: 0,
+            stack: vec![0; STACK_SIZE],
+            stack_ptr: 0,
+            pc: target.start_address(),
+            sound_timer: 0,
+            delay_timer: 0,
+            keys: Keyboard::new(),
+            display: Display::new(),
+            waiting_for_key: None,
+            target,
+            target_quirks: target.default_quirks(),
+            rpl_regs: [0; RPL_REG_COUNT],
+            rng: Rng::new(rng_seed.unwrap_or(123 << 5)),
+            audio_pattern: [0; 16],
+            pitch: 64,
+        }
+    }
+
+    fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
+        use crate::config::quirks::Quirk::*;
+        use crate::emu::encode_decode::Opcode::*;
+        match operation {
+            NoOp => (),
+            ClS => self.display.clear(),
+            Ret => {
+                self.pc = self.pop()?;
+            }
+            Jp(nnn) => self.pc = nnn,
+            Call(nnn) => {
+                self.push(self.pc);
+                self.pc = nnn;
+            }
+            SEByte(v_x, kk) => {
+                if self.get_reg(v_x) == kk {
+                    self.skip_instruction()
+                }
+            }
+            SNEByte(v_x, kk) => {
+                if self.get_reg(v_x) != kk {
+                    self.skip_instruction()
+                }
+            }
+            SEReg(v_x, v_y) => {
+                if self.get_reg(v_x) == self.get_reg(v_y) {
+                    self.skip_instruction()
+                }
+            }
+            SNEReg(v_x, v_y) => {
+                if self.get_reg(v_x) != self.get_reg(v_y) {
+                    self.skip_instruction()
+                }
+            }
+            LdByte(v_x, kk) => {
+                *self.get_reg_mut(v_x) = kk;
+            }
+            AddVxByte(v_x, kk) => {
+                *self.get_reg_mut(v_x) = self.get_reg(v_x).wrapping_add(kk);
+            }
+            LdReg(v_x, v_y) => {
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) = y;
+            }
+            Or(v_x, v_y) => {
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) |= y;
+                if self.has_quirk(VfExtraReset) {
+                    self.vf_flag(false);
+                }
+            }
+            And(v_x, v_y) => {
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) &= y;
+                if self.has_quirk(VfExtraReset) {
+                    self.vf_flag(false);
+                }
+            }
+            Xor(v_x, v_y) => {
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) ^= y;
+                if self.has_quirk(VfExtraReset) {
+                    self.vf_flag(false);
+                }
+            }
+            AddVxVy(v_x, v_y) => {
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) = x.wrapping_add(y);
+                self.vf_flag((x as u16 + y as u16) > 0xff);
+            }
+            Sub(v_x, v_y) => {
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) = x.wrapping_sub(y);
+                self.vf_flag(x >= y);
+            }
+            ShR(v_x, v_y) => {
+                let source = if self.has_quirk(ShiftUsesVx) {
+                    self.get_reg(v_x)
+                } else {
+                    self.get_reg(v_y)
+                };
+                *self.get_reg_mut(v_x) = source >> 1;
+                self.vf_flag(source & 0x1 == 0x1);
+            }
+            SubN(v_x, v_y) => {
+                let x = self.get_reg(v_x);
+                let y = self.get_reg(v_y);
+                *self.get_reg_mut(v_x) = y.wrapping_sub(x);
+                self.vf_flag(y >= x);
+            }
+            ShL(v_x, v_y) => {
+                let source = if self.has_quirk(ShiftUsesVx) {
+                    self.get_reg(v_x)
+                } else {
+                    self.get_reg(v_y)
+                };
+                *self.get_reg_mut(v_x) = source << 1;
+                self.vf_flag(source & 0x80 == 0x80);
+            }
+            LdToI(nnn) => {
+                self.i_reg = nnn;
+            }
+            JpReg(nnn) => {
+                let target = if self.has_quirk(JumpUsesVx) {
+                    let v_x = VRegister((nnn >> 8) as usize);
+                    nnn.wrapping_add(self.get_reg(v_x) as u16)
+                } else {
+                    nnn.wrapping_add(self.get_reg(VRegister(0)) as u16)
+                };
+                self.pc = target;
+            }
+            Rnd(v_x, kk) => {
+                *self.get_reg_mut(v_x) = self.get_rand_byte() & kk;
+            }
+            Drw(v_x, v_y, n) => {
+                let (width, height) = self.display_dimensions();
+                let (col, row) = (
+                    self.get_reg(v_x) as usize % width,
+                    self.get_reg(v_y) as usize % height,
+                );
+
+                let draws_16x16 = n == 0 && self.has_quirk(DrawSpriteOnDrwXY0);
+                let sprite_h: usize = if draws_16x16 { 16 } else { n as usize };
+                let sprite_width: usize = if draws_16x16
+                    && (self.is_extended() || self.has_quirk(LoResWideSpriteOnDrwXY0))
+                {
+                    2
+                } else {
+                    1
+                };
+
+                let mut addr = self.i_reg as usize;
+                let mut vf: u8 = 0;
+
+                for plane in self.display.get_plane_idx() {
+                    let chomps: Vec<u16> = (0..sprite_h)
+                        .map(|r| {
+                            let base = addr + r * sprite_width;
+                            if sprite_width == 2 {
+                                (self.ram[base].reverse_bits() as u16)
+                                    | (self.ram[base + 1].reverse_bits() as u16) << 8
+                            } else {
+                                self.ram[base].reverse_bits() as u16
+                            }
+                        })
+                        .collect();
+
+                    vf += self.display.draw_sprite(
+                        row,
+                        col,
+                        &chomps,
+                        plane,
+                        self.has_quirk(WrapPixelsOnDraw),
+                    );
+                    addr += sprite_h * sprite_width; // only advances for planes actually consumed
+                }
+
+                self.set_vf(if self.has_quirk(DrwCountsCollisionLines) {
+                    vf
+                } else {
+                    (vf > 0) as u8
+                });
+
+                if self.has_quirk(DispWait) && !self.is_extended() {
+                    return Ok(CpuCode::DispWait);
+                }
+            }
+            SkP(v_x) => {
+                if self.keys.is_pressed(self.get_reg(v_x))? {
+                    self.skip_instruction()
+                }
+            }
+            SkNP(v_x) => {
+                if !self.keys.is_pressed(self.get_reg(v_x))? {
+                    self.skip_instruction()
+                }
+            }
+            LdDTVx(v_x) => *self.get_reg_mut(v_x) = self.delay_timer,
+            LdKey(v_x) => {
+                self.waiting_for_key = Some(v_x);
+                return Ok(CpuCode::KeyWait);
+            }
+            LdVxDT(v_x) => self.delay_timer = self.get_reg(v_x),
+            LdVxST(v_x) => self.sound_timer = self.get_reg(v_x), // IIRC wrapping add on I is not possible
+            AddIVx(v_x) => {
+                self.i_reg += self.get_reg(v_x) as u16;
+            }
+            LdSpr(v_x) => {
+                let idx = self.get_reg(v_x);
+                // SChip 1.0 Quirk
+                self.i_reg = if idx > 0xF && self.has_quirk(LargeSpriteOnFx29) {
+                    Sprite::from_hex(idx % 0x10, true)? as u16
+                } else {
+                    Sprite::from_hex(idx, false)? as u16
+                }
+            }
+            LdDeci(v_x) => {
+                let val = self.get_reg(v_x) as u16;
+                for pow in (0..3).rev() {
+                    self.ram[(self.i_reg + (2 - pow)) as usize] =
+                        ((val / 10u16.pow(pow as u32)) % 10) as u8;
+                }
+            }
+            LdVxI(v_x) => {
+                for i in 0..=v_x.0 {
+                    self.ram[self.i_reg as usize + i] = self.get_reg(VRegister(i));
+                }
+                if self.has_quirk(IncrIOnLd) {
+                    self.i_reg += v_x.0 as u16 + 1;
+                }
+            }
+            LdIVx(v_x) => {
+                for i in 0..=v_x.0 {
+                    *self.get_reg_mut(VRegister(i)) = self.ram[self.i_reg as usize + i];
+                }
+                if self.has_quirk(IncrIOnLd) {
+                    self.i_reg += v_x.0 as u16 + 1;
+                }
+            }
+            // SCHIP Opcodes
+            ScD(n) => {
+                let scr_by = (if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    n / 2
+                } else {
+                    n
+                }) as usize;
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Down)
+            }
+            ScR => {
+                let scr_by = if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    2
+                } else {
+                    4
+                };
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Right)
+            }
+            ScL => {
+                let scr_by = if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    2
+                } else {
+                    4
+                };
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Left)
+            }
+            Exit => {}
+            LoRes => self.display.enter_lo_res(),
+            HiRes => self.display.enter_hi_res(),
+            SaveFlags(v_x) => {
+                let top_reg = self.get_top_rpl_reg(v_x);
+                for x in 0..=top_reg {
+                    self.rpl_regs[x] = self.get_reg(VRegister(x));
+                }
+            }
+            LdFlags(v_x) => {
+                let top_reg = self.get_top_rpl_reg(v_x);
+                for x in 0..=top_reg {
+                    *self.get_reg_mut(v_x) = self.rpl_regs[x];
+                }
+            }
+            // Octo Opcodes
+            ScU(n) => {
+                let scr_by = (if self.has_quirk(ScrHalfOnLoRes) && !self.is_extended() {
+                    n / 2
+                } else {
+                    n
+                }) as usize;
+                self.display
+                    .scroll_selected_planes_by(scr_by, Direction::Up)
+            }
+            LdILong(chomp) => self.i_reg = chomp,
+            LdIVxToVy(v_x, v_y) => {
+                let start = self.i_reg as usize;
+                for (idx, reg) in (v_x.0..=v_y.0).enumerate() {
+                    self.ram[start + idx] = self.get_reg(VRegister(reg));
+                }
+            }
+            LdVxToVyI(v_x, v_y) => {
+                let start = self.i_reg as usize;
+                for (idx, reg) in (v_x.0..=v_y.0).enumerate() {
+                    *self.get_reg_mut(VRegister(reg)) = self.ram[start + idx];
+                }
+            }
+            SelectPlane(n) => self.display.set_targeted_plane(match n & 0b11 {
+                0b11 => TargetPlane::Both,
+                0b01 => TargetPlane::Plane1,
+                0b10 => TargetPlane::Plane2,
+                _ => TargetPlane::None,
+            }),
+            StoreAudioBuffer => {
+                let start = self.i_reg as usize;
+                self.audio_pattern[..].copy_from_slice(&self.ram[start..start + 16]);
+            }
+            SetPitch(v_x) => {
+                self.pitch = self.get_reg(v_x);
+            }
+            LdLargeSpr(v_x) => {
+                self.i_reg = Sprite::from_hex(self.get_reg(v_x) & 0xF, true)? as u16;
+            }
+        };
+        Ok(CpuCode::Ok)
+    }
+
+    pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), &'static str> {
+        if rom.len() + self.target.start_address() as usize > self.target.ram_size() {
+            return Err("ROM too large");
+        }
+        self.ram[0x200..0x200 + rom.len()].copy_from_slice(rom);
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.ram[self.target.start_address() as usize..].fill(0);
+        self.v_reg.fill(0);
+        self.i_reg = 0;
+        self.stack_ptr = 0;
+        self.stack.clear();
+        self.pc = self.target.start_address();
+        self.sound_timer = 0;
+        self.delay_timer = 0;
+        self.keys.reset();
+        self.display.clear();
+        self.audio_pattern = [0; 16];
+        self.pitch = 64;
+    }
+
+    pub fn load_state(&mut self, mut new_state: Cpu, new_target: Target) {
+        if new_target != self.target {
+            self.target = new_target;
+            core::mem::swap(self, &mut new_state);
+        }
+    }
+
+    pub fn eject_state(&mut self) -> Cpu {
+        let mut holder = Cpu::new(self.target, None);
+        core::mem::swap(self, &mut holder);
+        holder
+    }
+
+    pub fn swap_state(&mut self, other: &mut Cpu) {
+        core::mem::swap(self, other);
+    }
+
+    fn push(&mut self, val: u16) {
+        if self.stack_ptr == self.stack.len() as u16 {
+            self.stack.push(0);
+        }
+        self.stack[self.stack_ptr as usize] = val;
+        self.stack_ptr += 1;
+    }
+
+    fn pop(&mut self) -> Result<u16, &'static str> {
+        if self.stack_ptr == 0 {
+            return Err("Attempted to pop from empty stack");
+        }
+        self.stack_ptr -= 1;
+        Ok(self.stack[self.stack_ptr as usize])
+    }
+
+    pub fn tick_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+    }
+
+    pub fn is_making_sound(&self) -> bool {
+        self.sound_timer > 0
+    }
+
+    pub fn is_waiting_for_key(&self) -> bool {
+        self.waiting_for_key.is_some()
+    }
+
+    pub fn is_extended(&self) -> bool {
+        self.display.is_extended()
+    }
+
+    pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
+        if let Some(reg) = self.waiting_for_key {
+            if let Some(first_input) = self.keys.as_input_key() {
+                if !self.keys.is_pressed(first_input)? {
+                    *self.get_reg_mut(reg) = first_input;
+                    self.waiting_for_key = None;
+                }
+            }
+            return Ok(CpuCode::Skipped);
+        }
+        let opcode = self.fetch()?;
+        let operation = if opcode == 0xF000 {
+            let idx = self.pc as usize;
+            let chomp = (self.ram[idx] as u16) << 8 | self.ram[idx + 1] as u16;
+            self.pc += 2;
+            LdILong(chomp)
+        } else {
+            decode_instruction(opcode)
+        };
+        self.execute(operation)
+    }
+
+    fn fetch(&mut self) -> Result<u16, &'static str> {
+        let addr = self.pc;
+        let opcode = (self.ram[addr as usize] as u16) << 8 | self.ram[addr as usize + 1] as u16;
+        self.pc += 2;
+        Ok(opcode)
+    }
+
+    fn skip_instruction(&mut self) {
+        let next_opcode =
+            (self.ram[self.pc as usize] as u16) << 8 | self.ram[self.pc as usize + 1] as u16;
+        // In XO-chip we need to account for 32bit wide opcode F000 aaaa
+        if next_opcode == 0xF000 && matches!(self.target, Target::XOChip) {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn get_top_rpl_reg(&self, v_x: VRegister) -> usize {
+        if matches!(self.target, Target::SChip8Legacy | Target::SChip8Modern) {
+            v_x.0 % 8
+        } else if matches!(self.target, Target::XOChip) {
+            v_x.0 % 16
+        } else {
+            0
+        }
+    }
+    fn vf_flag(&mut self, pred: bool) {
+        self.v_reg[0xF] = if pred { 1 } else { 0 };
+    }
+
+    fn set_vf(&mut self, num: u8) {
+        self.v_reg[0xF] = num;
+    }
+}

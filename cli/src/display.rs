@@ -1,15 +1,21 @@
 use crate::frontend::Frontend;
 use crate::Term;
-use chippy8::hardware::cpu::Cpu;
-use ratatui::layout::Constraint::{Fill, Length, Min};
-use ratatui::layout::Direction::Horizontal;
-use ratatui::layout::Flex;
-use ratatui::prelude::Constraint::Max;
-use ratatui::prelude::Direction::Vertical;
-use ratatui::widgets::{BorderType, Padding};
+use chippy8::cpu::Cpu;
 use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders},
+    prelude::{
+        Direction::Horizontal,
+        Constraint::{Fill, Length, Min},
+        Constraint::Max,
+        Direction::Vertical,
+        *
+    },
+    layout::Flex,
+    widgets::{
+        BorderType,
+        Padding,
+        Block,
+        Borders
+    }
 };
 use std::rc::Rc;
 

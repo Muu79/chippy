@@ -111,7 +111,7 @@ impl Sub<Quirk> for Quirks {
 impl Sub for Quirks {
     type Output = Quirks;
     fn sub(self, other: Quirks) -> Self::Output {
-        Quirks::from(self.quirk_map & !(other.quirk_map))
+        Quirks::from(self.quirk_map & !other.quirk_map)
     }
 }
 

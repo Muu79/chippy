@@ -1,10 +1,10 @@
 use crate::frontend::Frontend;
-use chippy8::hardware::cpu::Cpu;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Line, Stylize, Text};
 use ratatui::style::Color;
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Padding, Paragraph};
 use ratatui::Frame;
+use chippy8::cpu::Cpu;
 
 impl Frontend {
     pub(crate) fn render_debug_window(

@@ -1,7 +1,6 @@
 use crate::config::quirks::Quirk::*;
 use Target::*;
 use crate::config::quirks::Quirks;
-use crate::hardware::cpu::Cpu;
 /// Target for CPU to emulate, chippy8 currently supports CHIP-8, Super Chip 1.x, and XO-Chip.
 /// The target is set at [Cpu] creation time and cannot be changed due to RAM and register differences
 #[derive(PartialEq, Copy, Clone)]
