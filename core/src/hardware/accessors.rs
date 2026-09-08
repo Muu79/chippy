@@ -1,7 +1,8 @@
 use crate::config::quirks::{Quirk, Quirks};
 use crate::config::target::Target;
+use crate::display::Display;
 use crate::hardware::cpu::{Cpu, VRegister};
-use crate::hardware::{Display, Keyboard};
+use crate::hardware::Keyboard;
 
 impl Cpu {
     /// Get the current quirk profile for the [Cpu]

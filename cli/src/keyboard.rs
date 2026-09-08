@@ -1,6 +1,5 @@
 use crate::frontend::Frontend;
-use chippy8::hardware::Keyboard;
-use chippy8::parse_hex;
+use chippy8::hardware::{key_from_char, Keyboard};
 use crossterm::event::{Event, KeyCode::*, KeyEventKind::*, KeyModifiers};
 
 impl Frontend {
@@ -13,7 +12,7 @@ impl Frontend {
         for key_event in key_events {
             let key_char = key_event.code.as_char();
             let key_idx = if let Some(key_char) = key_char {
-                parse_hex(key_char).ok()
+                key_from_char(key_char).ok()
             } else {
                 None
             };

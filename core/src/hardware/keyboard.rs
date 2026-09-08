@@ -53,6 +53,7 @@ impl Keyboard {
     pub fn reset_input_key(&mut self) {
         self.input_key = None;
     }
+    
 }
 
 impl core::fmt::Display for Keyboard {
@@ -91,4 +92,8 @@ impl BitOrAssign for Keyboard {
     fn bitor_assign(&mut self, rhs: Self) {
         self.map |= rhs.map;
     }
+}
+
+pub fn key_from_char(hex: char) -> Result<u16, &'static str> {
+    u16::from_str_radix(&hex.to_string(), 16).map_err(|_| "Invalid hex string")
 }

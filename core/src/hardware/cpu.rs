@@ -1,13 +1,16 @@
-use alloc::boxed::Box;
-use alloc::vec;
-use alloc::vec::Vec;
 use crate::config::quirks::Quirks;
 use crate::config::target::Target;
 use crate::config::target::Target::Chip8;
+use crate::display::font::{Sprite, CHAR_MAP};
+use crate::display::{Direction, Display, TargetPlane};
 use crate::emu::encode_decode::Opcode::*;
 use crate::emu::encode_decode::{decode_instruction, Opcode};
-use crate::hardware::{Direction, Display, Keyboard, Sprite, TargetPlane, CHAR_MAP};
-use crate::Rng;
+use crate::hardware::Keyboard;
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use crate::rng::Rng;
+
 pub(super) static STACK_SIZE: usize = 16;
 pub(super) static REG_COUNT: usize = 16;
 pub(super) static RPL_REG_COUNT: usize = 16;
@@ -52,7 +55,6 @@ pub enum CpuError {
     InvalidOpcode(u8),
     InvalidRegister(u8),
     InvalidAddress(u16),
-    
 }
 #[repr(u8)]
 pub enum CpuCode {
@@ -93,8 +95,8 @@ impl Cpu {
     }
 
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
-        use crate::emu::encode_decode::Opcode::*;
         use crate::config::quirks::Quirk::*;
+        use crate::emu::encode_decode::Opcode::*;
         match operation {
             NoOp => (),
             ClS => self.display.clear(),
@@ -478,8 +480,7 @@ impl Cpu {
 
     pub fn tick_cpu(&mut self) -> Result<CpuCode, &'static str> {
         if let Some(reg) = self.waiting_for_key {
-            if let Some(first_input) = self.keys.as_input_key()
-            {
+            if let Some(first_input) = self.keys.as_input_key() {
                 if !self.keys.is_pressed(first_input)? {
                     *self.get_reg_mut(reg) = first_input;
                     self.waiting_for_key = None;
