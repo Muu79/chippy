@@ -6,6 +6,11 @@ use alloc::string::{ToString};
 
 pub mod emu;
 pub mod hardware;
+pub mod isa;
+pub mod config;
+pub mod cpu;
+pub mod display;
+pub mod error;
 
 pub fn parse_hex(hex: char) -> Result<u16, &'static str> {
     u16::from_str_radix(&hex.to_string(), 16).map_err(|_| "Invalid hex string")

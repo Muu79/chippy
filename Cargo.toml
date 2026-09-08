@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["core", "cli", "asm"]
+
+[profile.release]
+lto = true
+codegen-units = 1

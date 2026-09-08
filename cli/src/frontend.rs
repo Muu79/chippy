@@ -1,4 +1,4 @@
-use chippy_core::hardware::Keyboard;
+use chippy8::hardware::Keyboard;
 use crossterm::event;
 use crossterm::event::Event;
 use ratatui::style::Color;

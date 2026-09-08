@@ -1,5 +1,5 @@
 use crate::frontend::Frontend;
-use chippy_core::hardware::cpu::Cpu;
+use chippy8::hardware::cpu::Cpu;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Line, Stylize, Text};
 use ratatui::style::Color;

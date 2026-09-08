@@ -1,6 +1,7 @@
 use crate::hardware::cpu::VRegister;
 use Opcode::*;
 
+/// Opcodes corresponding to chip-8 instructions. `[[Cpu]]` fetches and then decodes these
 pub enum Opcode {
     NoOp,
     ClS,

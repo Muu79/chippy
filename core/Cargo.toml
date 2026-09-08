@@ -1,15 +1,13 @@
 [package]
-name = "chippy_core"
+name = "chippy8"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 rust-version = "1.56"
 repository = "https://github.com/Muu79/chippy"
 readme = "README.md"
-keywords = ["chip8", "schip8", "xochip", "emulator"]
+keywords = ["chip8", "schip8", "super-chip",  "xo-chip", "emulator"]
 categories = ["emulators", "no-std"]
-
-[dependencies]
 
 [features]
 default = ["std"]

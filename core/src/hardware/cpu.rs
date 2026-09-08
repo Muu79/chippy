@@ -1,16 +1,19 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
+use crate::config::quirks::Quirks;
+use crate::config::target::Target;
+use crate::config::target::Target::Chip8;
 use crate::emu::encode_decode::Opcode::*;
 use crate::emu::encode_decode::{decode_instruction, Opcode};
-use crate::emu::targets::Target::Chip8;
-use crate::emu::targets::{Quirks, Target};
 use crate::hardware::{Direction, Display, Keyboard, Sprite, TargetPlane, CHAR_MAP};
 use crate::Rng;
 pub(super) static STACK_SIZE: usize = 16;
 pub(super) static REG_COUNT: usize = 16;
 pub(super) static RPL_REG_COUNT: usize = 16;
 
+/// The CPU makes up the heart of the emulator. It is responsible for the flow of instructions,
+/// as well as owning and managing the keyboard and display buffer
 pub struct Cpu {
     pub(super) ram: Box<[u8]>,
     pub(super) v_reg: [u8; REG_COUNT],
@@ -33,7 +36,7 @@ pub struct Cpu {
     pub(super) pitch: u8,
 }
 #[derive(Copy, Clone, PartialEq)]
-pub struct VRegister(pub(crate) usize);
+pub(crate) struct VRegister(pub(crate) usize);
 impl From<VRegister> for u8 {
     fn from(value: VRegister) -> Self {
         0xF & value.0 as u8
@@ -43,6 +46,13 @@ impl From<VRegister> for u16 {
     fn from(value: VRegister) -> Self {
         0xF & value.0 as u16
     }
+}
+
+pub enum CpuError {
+    InvalidOpcode(u8),
+    InvalidRegister(u8),
+    InvalidAddress(u16),
+    
 }
 #[repr(u8)]
 pub enum CpuCode {
@@ -84,7 +94,7 @@ impl Cpu {
 
     fn execute(&mut self, operation: Opcode) -> Result<CpuCode, &'static str> {
         use crate::emu::encode_decode::Opcode::*;
-        use crate::emu::targets::Quirk::*;
+        use crate::config::quirks::Quirk::*;
         match operation {
             NoOp => (),
             ClS => self.display.clear(),

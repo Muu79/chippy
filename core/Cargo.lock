@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "chippy_core"
+name = "chippy8"
 version = "0.1.0"
 dependencies = [
     "log",

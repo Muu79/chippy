@@ -1,6 +1,6 @@
 use crate::frontend::Frontend;
-use chippy_core::hardware::Keyboard;
-use chippy_core::parse_hex;
+use chippy8::hardware::Keyboard;
+use chippy8::parse_hex;
 use crossterm::event::{Event, KeyCode::*, KeyEventKind::*, KeyModifiers};
 
 impl Frontend {

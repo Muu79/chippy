@@ -1,22 +1,28 @@
-use crate::emu::targets::{Quirk, Target};
+use crate::config::quirks::{Quirk, Quirks};
+use crate::config::target::Target;
 use crate::hardware::cpu::{Cpu, VRegister};
 use crate::hardware::{Display, Keyboard};
 
 impl Cpu {
-    pub fn get_quirk_map(&self) -> u16 {
-        self.target_quirks.quirk_map
+    /// Get the current quirk profile for the [Cpu]
+    pub fn get_quirks(&self) -> Quirks {
+        self.target_quirks
     }
-    pub fn set_quirk_map(&mut self, quirk_map: u16) {
-        self.target_quirks.quirk_map = quirk_map
+    /// Set (Overwrite) the current quirk profile for the [Cpu]
+    pub fn set_quirks(&mut self, new_quirks: Quirks) {
+        self.target_quirks = new_quirks;
     }
+    /// Check if the [Cpu] has a specific [Quirk] enabled
     pub fn has_quirk(&self, quirk: Quirk) -> bool {
-        self.target_quirks.quirk_map & quirk as u16 != 0
+        self.target_quirks.contains(quirk)
     }
+    /// Enable a specific [Quirk] for the [Cpu]
     pub fn set_quirk(&mut self, quirk: Quirk) {
-        self.target_quirks.quirk_map |= quirk as u16
+        self.target_quirks |= quirk
     }
+    /// Disable a specific [Quirk] for the [Cpu]
     pub fn clear_quirk(&mut self, quirk: Quirk) {
-        self.target_quirks.quirk_map &= !(quirk as u16)
+        self.target_quirks -= quirk
     }
     pub fn get_pc(&self) -> u16 {
         self.pc
@@ -24,9 +30,11 @@ impl Cpu {
     pub fn get_i_reg(&self) -> u16 {
         self.i_reg
     }
+    /// Get a slice over the [Cpu]'s V registers from 0 to F
     pub fn get_v_regs(&self) -> &[u8] {
         &self.v_reg
     }
+    /// Get a slice over the [Cpu]'s active stack
     pub fn get_stack(&self) -> &[u16] {
         &self.stack[..self.stack_ptr as usize]
     }

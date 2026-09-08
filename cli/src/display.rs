@@ -1,6 +1,6 @@
 use crate::frontend::Frontend;
 use crate::Term;
-use chippy_core::hardware::cpu::Cpu;
+use chippy8::hardware::cpu::Cpu;
 use ratatui::layout::Constraint::{Fill, Length, Min};
 use ratatui::layout::Direction::Horizontal;
 use ratatui::layout::Flex;

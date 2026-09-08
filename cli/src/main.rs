@@ -5,10 +5,8 @@ mod frontend;
 mod keyboard;
 
 use crate::audio::{AudioState, Chip8AudioSource};
-use chippy_core::{
-    emu::targets::Target,
-    hardware::cpu::{Cpu, CpuCode},
-};
+use chippy8::config::target::Target;
+use chippy8::hardware::cpu::{Cpu, CpuCode};
 use crossterm::{
     event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
     execute,
@@ -20,6 +18,7 @@ use crossterm::{
 use frontend::Frontend;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
+use std::time::SystemTime;
 use std::{
     env,
     error::Error,
@@ -28,7 +27,6 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
-use std::time::SystemTime;
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 struct TerminalGuard {
@@ -104,9 +102,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let rom = std::fs::read(rom_path)?;
-    let mut cpu = Cpu::new(target, Some(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs()));
+    let mut cpu = Cpu::new(
+        target,
+        Some(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_secs(),
+        ),
+    );
     cpu.load_rom(&rom)?;
-
     let mut frontend = Frontend::new();
     let (audio_state, _audio_player, _audio_handle) = init_audio(target == Target::XOChip);
     let instructions_per_frame = cpu.get_target().default_instructions_per_frame();
