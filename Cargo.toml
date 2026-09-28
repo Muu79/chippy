@@ -4,4 +4,4 @@ members = ["core", "cli", "asm"]
 
 [profile.release]
 lto = true
-codegen-units = 2
+codegen-units = 1
